@@ -40,8 +40,6 @@ def root():
 def health():
     return {"status": "ok"}
 
-# Router القديم (health-db وغيره)
-app.include_router(api_router)
 
 # DB + JWT
 DATABASE_URL = os.getenv("DATABASE_URL", "")
@@ -392,7 +390,7 @@ def create_order(
 
             # status/total/currency/notes
             if status_col:
-                order_payload[status_col] = "pending"
+                order_payload[status_col] = body.get("status") or "placed"
             if total_col:
                 order_payload[total_col] = 0
             if currency_col:
@@ -526,11 +524,12 @@ def order_details(order_id: str, authorization: Optional[str] = Header(default=N
         order_dict = dict(order_row._mapping)
 
         # العميل يشوف طلبه فقط
-        if "admin" not in roles and "merchant" not in roles:
-            customer_col = pick_col(orders, ["customer_user_id", "customer_id", "user_id", "profile_id"])
-        if str(order_dict.get(customer_col)) != str(user_id):
+        customer_col = pick_col(orders, ["customer_user_id", "customer_id", "user_id", "profile_id"])
 
-                raise HTTPException(status_code=403, detail="not allowed")
+   if "admin" not in roles and "merchant" not in roles:
+    if str(order_dict.get(customer_col)) != str(user_id):
+        raise HTTPException(status_code=403, detail="not allowed")
+
 
         items = conn.execute(select(order_items).where(order_items.c.order_id == order_id)).fetchall()
         items_list = [dict(r._mapping) for r in items]
@@ -551,7 +550,19 @@ def update_order_status(
     if not new_status:
         raise HTTPException(status_code=400, detail="status is required")
 
-    allowed = {"pending", "accepted", "preparing", "out_for_delivery", "delivered", "cancelled"}
+    allowed = {
+    "draft",
+    "placed",
+    "accepted",
+    "preparing",
+    "ready",
+    "assigned",
+    "picked_up",
+    "en_route",
+    "delivered",
+    "cancelled",
+    "refunded",
+              }
     if new_status not in allowed:
         raise HTTPException(status_code=400, detail=f"invalid status. allowed: {sorted(list(allowed))}")
 
@@ -971,3 +982,6 @@ def vendor_orders(
 
         rows = conn.execute(stmt.order_by(_order_col(orders)).limit(100)).fetchall()
         return [dict(r._mapping) for r in rows]
+
+# Router القديم (health-db وغيره)
+app.include_router(api_router)
