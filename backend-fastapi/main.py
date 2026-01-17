@@ -172,24 +172,42 @@ def create_address(
 ):
     user_id = get_user_id_from_auth(authorization)
 
-    payload = {
+    payload: Dict[str, Any] = {
         "user_id": user_id,
         "label": body.get("label"),
         "city": body.get("city"),
-        "area": body.get("area"),
+
+        # area -> district (أو district مباشرة لو وصل)
+        "district": body.get("district") or body.get("area"),
+
         "street": body.get("street"),
-        "building": body.get("building"),
-        "notes": body.get("notes"),
-        "lat": body.get("lat"),
-        "lng": body.get("lng"),
+
+        # notes -> landmark (أو landmark مباشرة لو وصل)
+        "landmark": body.get("landmark") or body.get("notes"),
+
+        # lat/lng -> latitude/longitude
+        "latitude": body.get("latitude") if body.get("latitude") is not None else body.get("lat"),
+        "longitude": body.get("longitude") if body.get("longitude") is not None else body.get("lng"),
+
         "is_default": bool(body.get("is_default", False)),
     }
 
-    with engine.begin() as conn:
-        res = conn.execute(
-            insert(addresses).values(**payload).returning(addresses.c.id)
-        ).first()
-        return {"id": str(res[0])}
+    # احذف أي مفاتيح None + فلتر حسب أعمدة الجدول
+    payload = {k: v for k, v in payload.items() if v is not None}
+    payload = only_existing_cols(addresses, payload)
+
+    try:
+        with engine.begin() as conn:
+            res = conn.execute(
+                insert(addresses).values(**payload).returning(addresses.c.id)
+            ).first()
+            return {"id": str(res[0])}
+
+    except IntegrityError as e:
+        raise HTTPException(status_code=400, detail=f"DB IntegrityError: {str(getattr(e, 'orig', e))}")
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=500, detail=f"DB Error: {str(e)}")
+
 
 @app.post("/v1/service-requests")
 def create_service_request(
