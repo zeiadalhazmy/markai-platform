@@ -1,26 +1,24 @@
-from fastapi.middleware.cors import CORSMiddleware
 import os
 from typing import Optional, Any, Dict
+
 from fastapi import FastAPI, Header, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, MetaData, Table, select, insert
 from sqlalchemy.engine import Engine
-import jwt
+from jose import jwt  # ✅ بدل import jwt
 
-from app.api import router
+from app.api import router as api_router
 
-# --------------------
-# App
-# --------------------
 app = FastAPI(title="MarkAi Core API", version="1.0.0")
 
+# CORS
 cors = os.environ.get("CORS_ORIGINS", "*")
 origins = ["*"] if cors.strip() == "*" else [o.strip() for o in cors.split(",")]
 
-# ملاحظة: allow_credentials=True مع "*" تسبب مشاكل في المتصفح
 app.add_middleware(
     CORSMiddleware,
     allow_origins=origins,
-    allow_credentials=False if origins == ["*"] else True,
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -33,9 +31,10 @@ def root():
 def health():
     return {"status": "ok"}
 
-# --------------------
-# DB
-# --------------------
+# Router القديم (health-db وغيره)
+app.include_router(api_router)
+
+# DB + JWT
 DATABASE_URL = os.getenv("DATABASE_URL", "")
 JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
 
@@ -45,13 +44,11 @@ if not DATABASE_URL:
 engine: Engine = create_engine(DATABASE_URL, pool_pre_ping=True)
 meta = MetaData(schema="public")
 
+# Reflect tables
 categories = Table("categories", meta, autoload_with=engine)
 delivery_addresses = Table("delivery_addresses", meta, autoload_with=engine)
 service_requests = Table("service_requests", meta, autoload_with=engine)
 
-# --------------------
-# Auth helper
-# --------------------
 def get_user_id_from_auth(authorization: Optional[str]) -> str:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Bearer token")
@@ -70,9 +67,7 @@ def get_user_id_from_auth(authorization: Optional[str]) -> str:
         raise HTTPException(status_code=401, detail="Token missing sub")
     return user_id
 
-# --------------------
-# Endpoints (v1)
-# --------------------
+# ✅ NEW ENDPOINTS
 @app.get("/v1/categories")
 def list_categories():
     with engine.begin() as conn:
@@ -80,7 +75,10 @@ def list_categories():
         return [dict(r._mapping) for r in rows]
 
 @app.post("/v1/addresses")
-def create_address(body: Dict[str, Any], authorization: Optional[str] = Header(default=None)):
+def create_address(
+    body: Dict[str, Any],
+    authorization: Optional[str] = Header(default=None),
+):
     user_id = get_user_id_from_auth(authorization)
 
     payload = {
@@ -103,7 +101,10 @@ def create_address(body: Dict[str, Any], authorization: Optional[str] = Header(d
         return {"id": str(res[0])}
 
 @app.post("/v1/service-requests")
-def create_service_request(body: Dict[str, Any], authorization: Optional[str] = Header(default=None)):
+def create_service_request(
+    body: Dict[str, Any],
+    authorization: Optional[str] = Header(default=None),
+):
     user_id = get_user_id_from_auth(authorization)
 
     payload = {
@@ -124,7 +125,9 @@ def create_service_request(body: Dict[str, Any], authorization: Optional[str] = 
         return {"id": str(res[0])}
 
 @app.get("/v1/service-requests/me")
-def my_service_requests(authorization: Optional[str] = Header(default=None)):
+def my_service_requests(
+    authorization: Optional[str] = Header(default=None),
+):
     user_id = get_user_id_from_auth(authorization)
 
     with engine.begin() as conn:
@@ -135,8 +138,3 @@ def my_service_requests(authorization: Optional[str] = Header(default=None)):
             .limit(50)
         ).fetchall()
         return [dict(r._mapping) for r in rows]
-
-# --------------------
-# Include your existing router (آخر شيء)
-# --------------------
-app.include_router(router)
