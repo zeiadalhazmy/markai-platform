@@ -516,22 +516,26 @@ def order_details(order_id: str, authorization: Optional[str] = Header(default=N
     user_id = get_user_id_from_auth(authorization)
     roles = get_user_roles(user_id)
 
+    # عرّف customer_col دائمًا (حتى admin/merchant)
+    customer_col = pick_col(orders, ["customer_user_id", "customer_id", "user_id", "profile_id"])
+
     with engine.begin() as conn:
-        order_row = conn.execute(select(orders).where(orders.c.id == order_id).limit(1)).first()
+        order_row = conn.execute(
+            select(orders).where(orders.c.id == order_id).limit(1)
+        ).first()
         if not order_row:
             raise HTTPException(status_code=404, detail="order not found")
 
         order_dict = dict(order_row._mapping)
 
         # العميل يشوف طلبه فقط
-        customer_col = pick_col(orders, ["customer_user_id", "customer_id", "user_id", "profile_id"])
+        if "admin" not in roles and "merchant" not in roles:
+            if str(order_dict.get(customer_col)) != str(user_id):
+                raise HTTPException(status_code=403, detail="not allowed")
 
-   if "admin" not in roles and "merchant" not in roles:
-    if str(order_dict.get(customer_col)) != str(user_id):
-        raise HTTPException(status_code=403, detail="not allowed")
-
-
-        items = conn.execute(select(order_items).where(order_items.c.order_id == order_id)).fetchall()
+        items = conn.execute(
+            select(order_items).where(order_items.c.order_id == order_id)
+        ).fetchall()
         items_list = [dict(r._mapping) for r in items]
 
         return {"order": order_dict, "items": items_list}
