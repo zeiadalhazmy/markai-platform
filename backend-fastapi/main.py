@@ -413,7 +413,7 @@ def order_details(order_id: str, authorization: Optional[str] = Header(default=N
         order_dict = dict(order_row._mapping)
 
         # العميل يشوف طلبه فقط
-        if "admin" not in roles and "vendor_admin" not in roles:
+        if "admin" not in roles and "merchant" not in roles:
             if str(order_dict.get("customer_id")) != str(user_id):
                 raise HTTPException(status_code=403, detail="not allowed")
 
@@ -430,7 +430,7 @@ def update_order_status(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id_from_auth(authorization)
-    require_any_role(user_id, ["admin", "vendor_admin"])
+    require_any_role(user_id, ["admin", "merchant"])
 
     new_status = body.get("status")
     if not new_status:
@@ -496,3 +496,361 @@ def complete_service_request(req_id: str, authorization: Optional[str] = Header(
         if res.rowcount == 0:
             raise HTTPException(status_code=400, detail="not allowed or not found")
         return {"ok": True, "status": "completed"}
+
+# =========================
+# Vendor Admin CRUD
+# =========================
+
+def _best_owner_col(tbl: Table) -> Optional[str]:
+    # نحاول نعرف عمود مالك المتجر
+    for c in ["owner_id", "user_id", "profile_id", "created_by"]:
+        if c in tbl.c:
+            return c
+    return None
+
+def _order_col(tbl: Table) -> Any:
+    # ترتيب آمن بدون افتراض أعمدة
+    if "created_at" in tbl.c:
+        return tbl.c.created_at.desc()
+    if "updated_at" in tbl.c:
+        return tbl.c.updated_at.desc()
+    return tbl.c.id.desc()
+
+def _owned_vendor_ids(conn, user_id: str) -> list[str]:
+    owner_col = _best_owner_col(vendors)
+    if not owner_col:
+        # إذا جدول vendors ما فيه owner_id/user_id... نرجع كل شيء (حل مؤقت)
+        rows = conn.execute(select(vendors.c.id)).fetchall()
+        return [str(r[0]) for r in rows]
+
+    rows = conn.execute(
+        select(vendors.c.id).where(getattr(vendors.c, owner_col) == user_id)
+    ).fetchall()
+    return [str(r[0]) for r in rows]
+
+def _assert_vendor_owned(conn, vendor_id: str, user_id: str):
+    ids = _owned_vendor_ids(conn, user_id)
+    if vendor_id not in ids:
+        raise HTTPException(status_code=403, detail="vendor not owned by you")
+
+def _assert_branch_owned(conn, branch_id: str, user_id: str) -> str:
+    # يرجّع vendor_id الخاص بالفرع بعد التحقق
+    row = conn.execute(
+        select(vendor_branches).where(vendor_branches.c.id == branch_id).limit(1)
+    ).first()
+    if not row:
+        raise HTTPException(status_code=404, detail="branch not found")
+
+    b = dict(row._mapping)
+    vid = str(b.get("vendor_id")) if b.get("vendor_id") else None
+    if not vid:
+        raise HTTPException(status_code=400, detail="branch missing vendor_id")
+
+    _assert_vendor_owned(conn, vid, user_id)
+    return vid
+
+@app.get("/v1/vendor-admin/me")
+def vendor_admin_me(authorization: Optional[str] = Header(default=None)):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "vendor_admin"])
+
+    with engine.begin() as conn:
+        vids = _owned_vendor_ids(conn, user_id)
+        return {"user_id": user_id, "vendor_ids": vids}
+
+# 1) Vendors
+@app.post("/v1/vendor-admin/vendors")
+def create_vendor_admin_vendor(
+    body: Dict[str, Any],
+    authorization: Optional[str] = Header(default=None),
+):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "vendor_admin"])
+
+    payload = dict(body)
+
+    # ثبت المالك لو العمود موجود
+    owner_col = _best_owner_col(vendors)
+    if owner_col and owner_col not in payload:
+        payload[owner_col] = user_id
+
+    payload = only_existing_cols(vendors, payload)
+
+    with engine.begin() as conn:
+        res = conn.execute(insert(vendors).values(**payload).returning(vendors.c.id)).first()
+        return {"id": str(res[0])}
+
+@app.patch("/v1/vendor-admin/vendors/{vendor_id}")
+def update_vendor_admin_vendor(
+    vendor_id: str,
+    body: Dict[str, Any],
+    authorization: Optional[str] = Header(default=None),
+):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "vendor_admin"])
+
+    with engine.begin() as conn:
+        _assert_vendor_owned(conn, vendor_id, user_id)
+
+        payload = only_existing_cols(vendors, body)
+        if not payload:
+            return {"ok": True}
+
+        conn.execute(vendors.update().where(vendors.c.id == vendor_id).values(**payload))
+        return {"ok": True}
+
+@app.get("/v1/vendor-admin/vendors")
+def list_my_vendors(
+    authorization: Optional[str] = Header(default=None),
+):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "vendor_admin"])
+
+    with engine.begin() as conn:
+        owner_col = _best_owner_col(vendors)
+        stmt = select(vendors)
+        if owner_col:
+            stmt = stmt.where(getattr(vendors.c, owner_col) == user_id)
+        rows = conn.execute(stmt.order_by(_order_col(vendors))).fetchall()
+        return [dict(r._mapping) for r in rows]
+
+# 2) Branches
+@app.post("/v1/vendor-admin/branches")
+def create_branch(
+    body: Dict[str, Any],
+    authorization: Optional[str] = Header(default=None),
+):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "vendor_admin"])
+
+    vendor_id = body.get("vendor_id")
+    if not vendor_id:
+        raise HTTPException(status_code=400, detail="vendor_id is required")
+
+    with engine.begin() as conn:
+        _assert_vendor_owned(conn, str(vendor_id), user_id)
+
+        payload = only_existing_cols(vendor_branches, body)
+        res = conn.execute(
+            insert(vendor_branches).values(**payload).returning(vendor_branches.c.id)
+        ).first()
+        return {"id": str(res[0])}
+
+@app.patch("/v1/vendor-admin/branches/{branch_id}")
+def update_branch(
+    branch_id: str,
+    body: Dict[str, Any],
+    authorization: Optional[str] = Header(default=None),
+):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "vendor_admin"])
+
+    with engine.begin() as conn:
+        _assert_branch_owned(conn, branch_id, user_id)
+
+        payload = only_existing_cols(vendor_branches, body)
+        if not payload:
+            return {"ok": True}
+
+        conn.execute(vendor_branches.update().where(vendor_branches.c.id == branch_id).values(**payload))
+        return {"ok": True}
+
+@app.get("/v1/vendor-admin/branches")
+def list_my_branches(
+    vendor_id: Optional[str] = Query(default=None),
+    authorization: Optional[str] = Header(default=None),
+):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "vendor_admin"])
+
+    with engine.begin() as conn:
+        stmt = select(vendor_branches)
+
+        if vendor_id:
+            _assert_vendor_owned(conn, vendor_id, user_id)
+            stmt = stmt.where(vendor_branches.c.vendor_id == vendor_id)
+        else:
+            vids = _owned_vendor_ids(conn, user_id)
+            if vids:
+                stmt = stmt.where(vendor_branches.c.vendor_id.in_(vids))
+            else:
+                return []
+
+        rows = conn.execute(stmt.order_by(_order_col(vendor_branches))).fetchall()
+        return [dict(r._mapping) for r in rows]
+
+# 3) Products
+@app.post("/v1/vendor-admin/products")
+def create_product(
+    body: Dict[str, Any],
+    authorization: Optional[str] = Header(default=None),
+):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "vendor_admin"])
+
+    # المنتج غالبًا مرتبط بـ vendor_id (لو موجود) أو نربطه بفرع عبر inventory
+    with engine.begin() as conn:
+        # لو أرسل vendor_id تحقق الملكية
+        if "vendor_id" in body and body.get("vendor_id"):
+            _assert_vendor_owned(conn, str(body["vendor_id"]), user_id)
+
+        payload = only_existing_cols(products, body)
+        res = conn.execute(insert(products).values(**payload).returning(products.c.id)).first()
+        return {"id": str(res[0])}
+
+@app.patch("/v1/vendor-admin/products/{product_id}")
+def update_product(
+    product_id: str,
+    body: Dict[str, Any],
+    authorization: Optional[str] = Header(default=None),
+):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "vendor_admin"])
+
+    with engine.begin() as conn:
+        # لو جدول products فيه vendor_id نتحقق الملكية
+        if "vendor_id" in products.c:
+            row = conn.execute(select(products).where(products.c.id == product_id).limit(1)).first()
+            if not row:
+                raise HTTPException(status_code=404, detail="product not found")
+            p = dict(row._mapping)
+            vid = p.get("vendor_id")
+            if vid:
+                _assert_vendor_owned(conn, str(vid), user_id)
+
+        payload = only_existing_cols(products, body)
+        if not payload:
+            return {"ok": True}
+
+        conn.execute(products.update().where(products.c.id == product_id).values(**payload))
+        return {"ok": True}
+
+@app.get("/v1/vendor-admin/products")
+def list_my_products(
+    vendor_id: Optional[str] = Query(default=None),
+    authorization: Optional[str] = Header(default=None),
+):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "vendor_admin"])
+
+    with engine.begin() as conn:
+        stmt = select(products)
+
+        if vendor_id and "vendor_id" in products.c:
+            _assert_vendor_owned(conn, vendor_id, user_id)
+            stmt = stmt.where(products.c.vendor_id == vendor_id)
+        elif "vendor_id" in products.c:
+            vids = _owned_vendor_ids(conn, user_id)
+            if vids:
+                stmt = stmt.where(products.c.vendor_id.in_(vids))
+            else:
+                return []
+
+        rows = conn.execute(stmt.order_by(_order_col(products)).limit(200)).fetchall()
+        return [dict(r._mapping) for r in rows]
+
+# 4) Product Images (روابط صور)
+@app.post("/v1/vendor-admin/products/{product_id}/images")
+def add_product_image(
+    product_id: str,
+    body: Dict[str, Any],
+    authorization: Optional[str] = Header(default=None),
+):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "vendor_admin"])
+
+    image_url = body.get("url") or body.get("image_url")
+    if not image_url:
+        raise HTTPException(status_code=400, detail="url is required")
+
+    with engine.begin() as conn:
+        # تحقق ملكية المنتج لو فيه vendor_id
+        if "vendor_id" in products.c:
+            row = conn.execute(select(products).where(products.c.id == product_id).limit(1)).first()
+            if not row:
+                raise HTTPException(status_code=404, detail="product not found")
+            p = dict(row._mapping)
+            vid = p.get("vendor_id")
+            if vid:
+                _assert_vendor_owned(conn, str(vid), user_id)
+
+        payload = {"product_id": product_id, "url": image_url}
+        payload = only_existing_cols(product_images, payload)
+
+        res = conn.execute(insert(product_images).values(**payload).returning(product_images.c.id)).first()
+        return {"id": str(res[0])}
+
+# 5) Inventory Upsert (فرع + منتج)
+@app.put("/v1/vendor-admin/inventory")
+def upsert_inventory(
+    body: Dict[str, Any],
+    authorization: Optional[str] = Header(default=None),
+):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "vendor_admin"])
+
+    branch_id = body.get("branch_id")
+    product_id = body.get("product_id")
+    if not branch_id or not product_id:
+        raise HTTPException(status_code=400, detail="branch_id and product_id are required")
+
+    with engine.begin() as conn:
+        _assert_branch_owned(conn, str(branch_id), user_id)
+
+        # هل موجود؟
+        existing = conn.execute(
+            select(branch_inventory)
+            .where(branch_inventory.c.branch_id == branch_id)
+            .where(branch_inventory.c.product_id == product_id)
+            .limit(1)
+        ).first()
+
+        payload = only_existing_cols(branch_inventory, body)
+
+        if existing:
+            conn.execute(
+                branch_inventory.update()
+                .where(branch_inventory.c.branch_id == branch_id)
+                .where(branch_inventory.c.product_id == product_id)
+                .values(**payload)
+            )
+            return {"ok": True, "mode": "updated"}
+
+        res = conn.execute(insert(branch_inventory).values(**payload).returning(branch_inventory.c.id)).first()
+        return {"ok": True, "mode": "inserted", "id": str(res[0])}
+
+# 6) Vendor Orders (طلبات متجرك)
+@app.get("/v1/vendor-admin/orders")
+def vendor_orders(
+    vendor_id: Optional[str] = Query(default=None),
+    branch_id: Optional[str] = Query(default=None),
+    authorization: Optional[str] = Header(default=None),
+):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "vendor_admin"])
+
+    with engine.begin() as conn:
+        vids = _owned_vendor_ids(conn, user_id)
+
+        if vendor_id:
+            _assert_vendor_owned(conn, vendor_id, user_id)
+            vids = [vendor_id]
+
+        # نجمع طلبات عبر vendor_branches -> orders.vendor_branch_id
+        stmt = select(orders)
+        if "vendor_branch_id" in orders.c:
+            if branch_id:
+                _assert_branch_owned(conn, branch_id, user_id)
+                stmt = stmt.where(orders.c.vendor_branch_id == branch_id)
+            else:
+                # كل فروع متاجرك
+                b_rows = conn.execute(
+                    select(vendor_branches.c.id).where(vendor_branches.c.vendor_id.in_(vids))
+                ).fetchall()
+                b_ids = [str(r[0]) for r in b_rows]
+                if not b_ids:
+                    return []
+                stmt = stmt.where(orders.c.vendor_branch_id.in_(b_ids))
+
+        rows = conn.execute(stmt.order_by(_order_col(orders)).limit(100)).fetchall()
+        return [dict(r._mapping) for r in rows]
