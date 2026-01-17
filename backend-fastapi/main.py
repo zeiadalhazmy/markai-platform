@@ -366,6 +366,22 @@ def create_order(
     oi_unit_price_col = pick_col(order_items, ["unit_price", "price"], required=False)
     oi_total_col      = pick_col(order_items, ["total", "line_total", "total_price", "amount"], required=False)
 
+    # ====== Snapshot columns (order_items) ======
+    oi_name_snap_col = pick_col(order_items, ["name_snapshot", "product_name_snapshot", "title_snapshot"], required=False)
+    oi_price_snap_col = pick_col(order_items, ["price_snapshot", "unit_price_snapshot"], required=False)
+    oi_currency_col   = pick_col(order_items, ["currency"], required=False)
+    oi_image_snap_col = pick_col(order_items, ["image_snapshot", "image_url_snapshot", "thumbnail_snapshot"], required=False)
+    oi_snapshot_col   = pick_col(order_items, ["product_snapshot", "item_snapshot", "snapshot"], required=False)
+
+    # ====== Product fields we can read ======
+    prod_name_col = pick_col(products, ["name", "title"], required=False)
+    img_url_col   = pick_col(product_images, ["url", "image_url", "src"], required=False)
+
+# ====== Product fields we can read ======
+prod_name_col = pick_col(products, ["name", "title"], required=False)
+img_url_col   = pick_col(product_images, ["url", "image_url", "src"], required=False)
+
+
     try:
         with engine.begin() as conn:
             # ✅ تأكد الفرع موجود + هات vendor_id منه
@@ -457,6 +473,51 @@ def create_order(
                     item_payload[oi_unit_price_col] = unit_price
                 if oi_total_col:
                     item_payload[oi_total_col] = line_total
+
+                # --- get product name for snapshot ---
+                                # --- get product name for snapshot ---
+                product_name = None
+                if prod_name_col:
+                    prn = conn.execute(
+                        select(getattr(products.c, prod_name_col))
+                        .where(products.c.id == product_id)
+                        .limit(1)
+                    ).first()
+                    if prn and prn[0] is not None:
+                        product_name = str(prn[0])
+
+                if not product_name:
+                    product_name = "Product"
+
+                # --- get product image (optional) ---
+                image_url = ""
+                if img_url_col:
+                    ir = conn.execute(
+                        select(getattr(product_images.c, img_url_col))
+                        .where(product_images.c.product_id == product_id)
+                        .limit(1)
+                    ).first()
+                    if ir and ir[0] is not None:
+                        image_url = str(ir[0])
+
+                # --- fill required snapshot cols if exist ---
+                if oi_name_snap_col:
+                    item_payload[oi_name_snap_col] = product_name
+                if oi_price_snap_col:
+                    item_payload[oi_price_snap_col] = unit_price
+                if oi_currency_col:
+                    item_payload[oi_currency_col] = "YER"
+                if oi_image_snap_col:
+                    item_payload[oi_image_snap_col] = image_url
+                if oi_snapshot_col:
+                    item_payload[oi_snapshot_col] = {
+                        "product_id": str(product_id),
+                        "name": product_name,
+                        "unit_price": unit_price,
+                        "qty": qty,
+                    }
+
+
 
                 conn.execute(insert(order_items).values(**item_payload))
 
