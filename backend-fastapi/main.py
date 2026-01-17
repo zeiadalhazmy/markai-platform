@@ -154,7 +154,6 @@ def my_service_requests(
         ).fetchall()
         return [dict(r._mapping) for r in rows]
 
-from fastapi import Query
 
 @app.get("/v1/vendors")
 def list_vendors():
