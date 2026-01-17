@@ -6,7 +6,8 @@ from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, MetaData, Table, select, insert, inspect
 from sqlalchemy.engine import Engine
-from jose import jwt  # ✅ بدل import jwt
+from jose import jwt, jwk
+from jose.exceptions import JWTError
 
 from app.api import router as api_router
 
@@ -94,7 +95,7 @@ def get_user_id_from_auth(authorization: Optional[str]) -> str:
             raise HTTPException(status_code=401, detail="Unknown token key (kid)")
 
         key = jwk.construct(jwk_dict, algorithm=alg)
-        payload = jwt.decode(token, key, algorithms=[alg], options={"verify_aud": False})
+        payload = jwt.decode(token, key.to_pem().decode("utf-8"), algorithms=[alg], options={"verify_aud": False})
 
         user_id = payload.get("sub")
         if not user_id:
