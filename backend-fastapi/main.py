@@ -1025,6 +1025,10 @@ def vendor_orders(
     user_id = get_user_id_from_auth(authorization)
     require_any_role(user_id, ["admin", "merchant"])
 
+    # detect columns safely
+    branch_col = "vendor_branch_id" if "vendor_branch_id" in orders.c else ("branch_id" if "branch_id" in orders.c else None)
+    vendor_col = "vendor_id" if "vendor_id" in orders.c else None
+
     with engine.begin() as conn:
         vids = _owned_vendor_ids(conn, user_id)
 
@@ -1032,24 +1036,20 @@ def vendor_orders(
             _assert_vendor_owned(conn, vendor_id, user_id)
             vids = [vendor_id]
 
-        # نجمع طلبات عبر vendor_branches -> orders.vendor_branch_id
         stmt = select(orders)
-        if "vendor_branch_id" in orders.c:
-            if branch_id:
-                _assert_branch_owned(conn, branch_id, user_id)
-                stmt = stmt.where(orders.c.vendor_branch_id == branch_id)
-            else:
-                # كل فروع متاجرك
-                b_rows = conn.execute(
-                    select(vendor_branches.c.id).where(vendor_branches.c.vendor_id.in_(vids))
-                ).fetchall()
-                b_ids = [str(r[0]) for r in b_rows]
-                if not b_ids:
-                    return []
-                stmt = stmt.where(orders.c.vendor_branch_id.in_(b_ids))
+
+        # filter by vendor if column exists
+        if vendor_col and vids:
+            stmt = stmt.where(getattr(orders.c, vendor_col).in_(vids))
+
+        # filter by branch if requested and column exists
+        if branch_id and branch_col:
+            _assert_branch_owned(conn, branch_id, user_id)
+            stmt = stmt.where(getattr(orders.c, branch_col) == branch_id)
 
         rows = conn.execute(stmt.order_by(_order_col(orders)).limit(100)).fetchall()
         return [dict(r._mapping) for r in rows]
+
 
 # Router القديم (health-db وغيره)
 app.include_router(api_router)
