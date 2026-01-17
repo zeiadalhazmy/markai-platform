@@ -1,14 +1,19 @@
-import os
-from fastapi import Query
+import os, json, urllib.request
+
 from typing import Optional, Any, Dict
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import create_engine, MetaData, Table, select, insert, inspect
 from sqlalchemy.engine import Engine
 from jose import jwt  # ✅ بدل import jwt
 
 from app.api import router as api_router
+
+SUPABASE_URL = os.getenv("SUPABASE_URL", "https://hcakrxaaarkufkxrehwy.supabase.co")
+JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
+
+_jwks_cache = None
 
 app = FastAPI(title="MarkAi Core API", version="1.0.0")
 
@@ -37,7 +42,6 @@ app.include_router(api_router)
 
 # DB + JWT
 DATABASE_URL = os.getenv("DATABASE_URL", "")
-JWT_SECRET = os.getenv("SUPABASE_JWT_SECRET", "")
 
 if not DATABASE_URL:
     raise RuntimeError("DATABASE_URL is missing")
@@ -63,23 +67,41 @@ profiles = Table("profiles", meta, autoload_with=engine)
 
 
 
+def _get_jwks():
+    global _jwks_cache
+    if _jwks_cache is None:
+        with urllib.request.urlopen(JWKS_URL) as r:
+            _jwks_cache = json.load(r)
+    return _jwks_cache
+
 def get_user_id_from_auth(authorization: Optional[str]) -> str:
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Missing Bearer token")
 
     token = authorization.split(" ", 1)[1].strip()
-    if not JWT_SECRET:
-        raise HTTPException(status_code=500, detail="SUPABASE_JWT_SECRET missing")
+    header = jwt.get_unverified_header(token)
+    kid = header.get("kid")
+    alg = header.get("alg", "ES256")
 
-    try:
-        payload = jwt.decode(token, JWT_SECRET, algorithms=["HS256"], options={"verify_aud": False})
-    except Exception:
-        raise HTTPException(status_code=401, detail="Invalid token")
+    jwks = _get_jwks()
+    key = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
 
+    # 👇 لو ما لقا المفتاح، حدّث الكاش مرة واحدة
+    if not key:
+        global _jwks_cache
+        _jwks_cache = None
+        jwks = _get_jwks()
+        key = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
+
+    if not key:
+        raise HTTPException(status_code=401, detail="Unknown token key (kid)")
+
+    payload = jwt.decode(token, key, algorithms=[alg], options={"verify_aud": False})
     user_id = payload.get("sub")
     if not user_id:
         raise HTTPException(status_code=401, detail="Token missing sub")
     return user_id
+
 
 def only_existing_cols(table: Table, data: Dict[str, Any]) -> Dict[str, Any]:
     cols = set(table.c.keys())
