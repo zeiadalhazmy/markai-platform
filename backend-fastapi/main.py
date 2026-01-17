@@ -524,11 +524,11 @@ def complete_service_request(req_id: str, authorization: Optional[str] = Header(
 # =========================
 
 def _best_owner_col(tbl: Table) -> Optional[str]:
-    # نحاول نعرف عمود مالك المتجر
-    for c in ["owner_id", "user_id", "profile_id", "created_by"]:
+    for c in ["owner_user_id", "owner_id", "user_id", "profile_id", "created_by"]:
         if c in tbl.c:
             return c
     return None
+
 
 def _order_col(tbl: Table) -> Any:
     # ترتيب آمن بدون افتراض أعمدة
