@@ -52,7 +52,11 @@ meta = MetaData(schema="public")
 
 # Reflect tables
 categories = Table("categories", meta, autoload_with=engine)
-addresses = Table("addresses", meta, autoload_with=engine)
+
+insp = inspect(engine)
+ADDRESS_TABLE = "delivery_addresses" if insp.has_table("delivery_addresses", schema="public") else "addresses"
+addresses = Table(ADDRESS_TABLE, meta, autoload_with=engine)
+
 service_requests = Table("service_requests", meta, autoload_with=engine)
 
 vendors = Table("vendors", meta, autoload_with=engine)
@@ -166,47 +170,40 @@ def list_categories():
         return [dict(r._mapping) for r in rows]
 
 @app.post("/v1/addresses")
-def create_address(
-    body: Dict[str, Any],
-    authorization: Optional[str] = Header(default=None),
-):
+def create_address(body: Dict[str, Any], authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id_from_auth(authorization)
 
-    payload: Dict[str, Any] = {
+    raw = {
         "user_id": user_id,
         "label": body.get("label"),
         "city": body.get("city"),
 
-        # area -> district (أو district مباشرة لو وصل)
+        # area/district
+        "area": body.get("area") or body.get("district"),
         "district": body.get("district") or body.get("area"),
 
         "street": body.get("street"),
+        "building": body.get("building"),
 
-        # notes -> landmark (أو landmark مباشرة لو وصل)
+        # notes/landmark
+        "notes": body.get("notes") or body.get("landmark"),
         "landmark": body.get("landmark") or body.get("notes"),
 
-        # lat/lng -> latitude/longitude
-        "latitude": body.get("latitude") if body.get("latitude") is not None else body.get("lat"),
-        "longitude": body.get("longitude") if body.get("longitude") is not None else body.get("lng"),
+        # lat/lng OR latitude/longitude
+        "lat": body.get("lat") or body.get("latitude"),
+        "latitude": body.get("latitude") or body.get("lat"),
+        "lng": body.get("lng") or body.get("longitude"),
+        "longitude": body.get("longitude") or body.get("lng"),
 
         "is_default": bool(body.get("is_default", False)),
     }
 
-    # احذف أي مفاتيح None + فلتر حسب أعمدة الجدول
-    payload = {k: v for k, v in payload.items() if v is not None}
-    payload = only_existing_cols(addresses, payload)
+    payload = only_existing_cols(addresses, raw)
 
-    try:
-        with engine.begin() as conn:
-            res = conn.execute(
-                insert(addresses).values(**payload).returning(addresses.c.id)
-            ).first()
-            return {"id": str(res[0])}
+    with engine.begin() as conn:
+        res = conn.execute(insert(addresses).values(**payload).returning(addresses.c.id)).first()
+        return {"id": str(res[0])}
 
-    except IntegrityError as e:
-        raise HTTPException(status_code=400, detail=f"DB IntegrityError: {str(getattr(e, 'orig', e))}")
-    except SQLAlchemyError as e:
-        raise HTTPException(status_code=500, detail=f"DB Error: {str(e)}")
 
 
 @app.post("/v1/service-requests")
@@ -413,7 +410,16 @@ def create_order(
 
             set_if_col(order_payload, orders, ["vendor_id", "store_id"], vendor_id)
 
+            # ✅ address fk check (validate before insert) - مرة واحدة فقط
             if address_col and address_id:
+                a = conn.execute(
+                    select(addresses.c.id).where(addresses.c.id == address_id).limit(1)
+                ).first()
+                if not a:
+                    raise HTTPException(
+                        status_code=400,
+                        detail=f"address_id not found in {addresses.name}"
+                    )
                 order_payload[address_col] = address_id
 
             if status_col:
@@ -439,7 +445,7 @@ def create_order(
 
             for it in items:
                 product_id = it.get("product_id")
-                qty = int(it.get("quantity", 1))
+                qty = int(it.get("quantity", 1) or 1)
                 if not product_id:
                     raise HTTPException(status_code=400, detail="product_id missing in items")
 
@@ -537,6 +543,7 @@ def create_order(
         raise HTTPException(status_code=500, detail=f"DB Error: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected Error: {str(e)}")
+
 
 
 
@@ -1015,7 +1022,6 @@ def upsert_inventory(
         res = conn.execute(insert(branch_inventory).values(**payload).returning(branch_inventory.c.id)).first()
         return {"ok": True, "mode": "inserted", "id": str(res[0])}
 
-# 6) Vendor Orders (طلبات متجرك)
 @app.get("/v1/vendor-admin/orders")
 def vendor_orders(
     vendor_id: Optional[str] = Query(default=None),
@@ -1023,29 +1029,44 @@ def vendor_orders(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id_from_auth(authorization)
+    roles = get_user_roles(user_id)
     require_any_role(user_id, ["admin", "merchant"])
+
+    is_admin = "admin" in roles
 
     # detect columns safely
     branch_col = "vendor_branch_id" if "vendor_branch_id" in orders.c else ("branch_id" if "branch_id" in orders.c else None)
     vendor_col = "vendor_id" if "vendor_id" in orders.c else None
 
     with engine.begin() as conn:
-        vids = _owned_vendor_ids(conn, user_id)
-
-        if vendor_id:
-            _assert_vendor_owned(conn, vendor_id, user_id)
-            vids = [vendor_id]
-
         stmt = select(orders)
 
-        # filter by vendor if column exists
-        if vendor_col and vids:
-            stmt = stmt.where(getattr(orders.c, vendor_col).in_(vids))
+        if is_admin:
+            # admin: اختياري فلترة
+            if vendor_id and vendor_col:
+                stmt = stmt.where(getattr(orders.c, vendor_col) == vendor_id)
 
-        # filter by branch if requested and column exists
-        if branch_id and branch_col:
-            _assert_branch_owned(conn, branch_id, user_id)
-            stmt = stmt.where(getattr(orders.c, branch_col) == branch_id)
+            if branch_id and branch_col:
+                stmt = stmt.where(getattr(orders.c, branch_col) == branch_id)
+
+        else:
+            # merchant: لازم يكون عنده vendors
+            vids = _owned_vendor_ids(conn, user_id)
+            if not vids:
+                return []
+
+            if vendor_id:
+                _assert_vendor_owned(conn, vendor_id, user_id)
+                vids = [vendor_id]
+
+            if vendor_col:
+                stmt = stmt.where(getattr(orders.c, vendor_col).in_(vids))
+            else:
+                raise HTTPException(status_code=500, detail="orders table missing vendor_id; cannot scope merchant orders safely")
+
+            if branch_id and branch_col:
+                _assert_branch_owned(conn, branch_id, user_id)
+                stmt = stmt.where(getattr(orders.c, branch_col) == branch_id)
 
         rows = conn.execute(stmt.order_by(_order_col(orders)).limit(100)).fetchall()
         return [dict(r._mapping) for r in rows]
