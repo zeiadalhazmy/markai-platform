@@ -552,7 +552,7 @@ def _assert_branch_owned(conn, branch_id: str, user_id: str) -> str:
 @app.get("/v1/vendor-admin/me")
 def vendor_admin_me(authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id_from_auth(authorization)
-    require_any_role(user_id, ["admin", "vendor_admin"])
+    require_any_role(user_id, ["admin", "merchant"])
 
     with engine.begin() as conn:
         vids = _owned_vendor_ids(conn, user_id)
@@ -565,7 +565,7 @@ def create_vendor_admin_vendor(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id_from_auth(authorization)
-    require_any_role(user_id, ["admin", "vendor_admin"])
+    require_any_role(user_id, ["admin", "merchant"])
 
     payload = dict(body)
 
@@ -587,7 +587,7 @@ def update_vendor_admin_vendor(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id_from_auth(authorization)
-    require_any_role(user_id, ["admin", "vendor_admin"])
+    require_any_role(user_id, ["admin", "merchant"])
 
     with engine.begin() as conn:
         _assert_vendor_owned(conn, vendor_id, user_id)
@@ -604,7 +604,7 @@ def list_my_vendors(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id_from_auth(authorization)
-    require_any_role(user_id, ["admin", "vendor_admin"])
+    require_any_role(user_id, ["admin", "merchant"])
 
     with engine.begin() as conn:
         owner_col = _best_owner_col(vendors)
@@ -621,7 +621,7 @@ def create_branch(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id_from_auth(authorization)
-    require_any_role(user_id, ["admin", "vendor_admin"])
+    require_any_role(user_id, ["admin", "merchant"])
 
     vendor_id = body.get("vendor_id")
     if not vendor_id:
@@ -643,7 +643,7 @@ def update_branch(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id_from_auth(authorization)
-    require_any_role(user_id, ["admin", "vendor_admin"])
+    require_any_role(user_id, ["admin", "merchant"])
 
     with engine.begin() as conn:
         _assert_branch_owned(conn, branch_id, user_id)
@@ -661,7 +661,7 @@ def list_my_branches(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id_from_auth(authorization)
-    require_any_role(user_id, ["admin", "vendor_admin"])
+    require_any_role(user_id, ["admin", "merchant"])
 
     with engine.begin() as conn:
         stmt = select(vendor_branches)
@@ -686,7 +686,7 @@ def create_product(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id_from_auth(authorization)
-    require_any_role(user_id, ["admin", "vendor_admin"])
+    require_any_role(user_id, ["admin", "merchant"])
 
     # المنتج غالبًا مرتبط بـ vendor_id (لو موجود) أو نربطه بفرع عبر inventory
     with engine.begin() as conn:
@@ -705,7 +705,7 @@ def update_product(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id_from_auth(authorization)
-    require_any_role(user_id, ["admin", "vendor_admin"])
+    require_any_role(user_id, ["admin", "merchant"])
 
     with engine.begin() as conn:
         # لو جدول products فيه vendor_id نتحقق الملكية
@@ -731,7 +731,7 @@ def list_my_products(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id_from_auth(authorization)
-    require_any_role(user_id, ["admin", "vendor_admin"])
+    require_any_role(user_id, ["admin", "merchant"])
 
     with engine.begin() as conn:
         stmt = select(products)
@@ -757,7 +757,7 @@ def add_product_image(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id_from_auth(authorization)
-    require_any_role(user_id, ["admin", "vendor_admin"])
+    require_any_role(user_id, ["admin", "merchant"])
 
     image_url = body.get("url") or body.get("image_url")
     if not image_url:
@@ -787,7 +787,7 @@ def upsert_inventory(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id_from_auth(authorization)
-    require_any_role(user_id, ["admin", "vendor_admin"])
+    require_any_role(user_id, ["admin", "merchant"])
 
     branch_id = body.get("branch_id")
     product_id = body.get("product_id")
@@ -827,7 +827,7 @@ def vendor_orders(
     authorization: Optional[str] = Header(default=None),
 ):
     user_id = get_user_id_from_auth(authorization)
-    require_any_role(user_id, ["admin", "vendor_admin"])
+    require_any_role(user_id, ["admin", "merchant"])
 
     with engine.begin() as conn:
         vids = _owned_vendor_ids(conn, user_id)
