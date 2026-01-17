@@ -354,6 +354,7 @@ def create_order(
     branch_col   = pick_col(orders, ["vendor_branch_id", "branch_id"])
     status_col   = pick_col(orders, ["status"], required=False)
     total_col    = pick_col(orders, ["total", "total_amount", "total_price", "amount_total"], required=False)
+    type_col = pick_col(orders, ["type", "order_type", "kind"], required=False)
     currency_col = pick_col(orders, ["currency"], required=False)
     notes_col    = pick_col(orders, ["notes", "note"], required=False)
     address_col  = pick_col(orders, ["address_id", "delivery_address_id", "customer_address_id"], required=False)
@@ -391,6 +392,8 @@ def create_order(
             # status/total/currency/notes
             if status_col:
                 order_payload[status_col] = body.get("status") or "placed"
+            if type_col:
+                order_payload[type_col] = body.get("type") or "water_truck"
             if total_col:
                 order_payload[total_col] = 0
             if currency_col:
