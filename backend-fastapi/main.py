@@ -4,7 +4,7 @@ from typing import Optional, Any, Dict
 
 from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, MetaData, Table, select, insert
+from sqlalchemy import create_engine, MetaData, Table, select, insert, inspect
 from sqlalchemy.engine import Engine
 from jose import jwt  # ✅ بدل import jwt
 
@@ -57,6 +57,10 @@ product_images = Table("product_images", meta, autoload_with=engine)
 branch_inventory = Table("branch_inventory", meta, autoload_with=engine)
 orders = Table("orders", meta, autoload_with=engine)
 order_items = Table("order_items", meta, autoload_with=engine)
+user_roles = Table("user_roles", meta, autoload_with=engine)
+couriers = Table("couriers", meta, autoload_with=engine)
+profiles = Table("profiles", meta, autoload_with=engine)
+
 
 
 def get_user_id_from_auth(authorization: Optional[str]) -> str:
@@ -80,6 +84,49 @@ def get_user_id_from_auth(authorization: Optional[str]) -> str:
 def only_existing_cols(table: Table, data: Dict[str, Any]) -> Dict[str, Any]:
     cols = set(table.c.keys())
     return {k: v for k, v in data.items() if k in cols}
+
+def get_user_roles(user_id: str) -> set[str]:
+    with engine.begin() as conn:
+        # حاول يقرأ من user_roles (role column)
+        if "role" in user_roles.c:
+            rows = conn.execute(
+                select(user_roles.c.role).where(user_roles.c.user_id == user_id)
+            ).fetchall()
+            return {str(r[0]) for r in rows}
+        return set()
+
+def require_any_role(user_id: str, allowed: list[str]):
+    roles = get_user_roles(user_id)
+    if not roles.intersection(set(allowed)):
+        raise HTTPException(status_code=403, detail=f"Requires role in {allowed}")
+    return roles
+
+def resolve_courier_id(conn, user_id: str) -> str:
+    # نحاول نطلع courier.id من couriers حسب الأعمدة الموجودة
+    if "user_id" in couriers.c:
+        row = conn.execute(select(couriers.c.id).where(couriers.c.user_id == user_id).limit(1)).first()
+        if row:
+            return str(row[0])
+        # إذا ما موجود، نحاول ننشئ سجل courier تلقائيًا (إذا الجدول يسمح)
+        payload = only_existing_cols(couriers, {"user_id": user_id, "is_active": True})
+        try:
+            new_row = conn.execute(insert(couriers).values(**payload).returning(couriers.c.id)).first()
+            return str(new_row[0])
+        except Exception:
+            raise HTTPException(status_code=400, detail="Courier record missing. Create it in couriers table first.")
+    elif "profile_id" in couriers.c:
+        row = conn.execute(select(couriers.c.id).where(couriers.c.profile_id == user_id).limit(1)).first()
+        if row:
+            return str(row[0])
+        payload = only_existing_cols(couriers, {"profile_id": user_id, "is_active": True})
+        try:
+            new_row = conn.execute(insert(couriers).values(**payload).returning(couriers.c.id)).first()
+            return str(new_row[0])
+        except Exception:
+            raise HTTPException(status_code=400, detail="Courier record missing. Create it in couriers table first.")
+    else:
+        # آخر حل: نفترض id = user_id (لو تصميمك كذا)
+        return user_id
 
 
 # ✅ NEW ENDPOINTS
@@ -336,3 +383,116 @@ def my_orders(
         ).fetchall()
         return [dict(r._mapping) for r in rows]
 
+@app.get("/v1/_schema/{table_name}")
+def table_schema(table_name: str):
+    insp = inspect(engine)
+    try:
+        cols = insp.get_columns(table_name, schema="public")
+    except Exception:
+        raise HTTPException(status_code=404, detail="table not found")
+    return [
+        {
+            "name": c["name"],
+            "type": str(c["type"]),
+            "nullable": c.get("nullable", True),
+            "default": str(c.get("default")),
+        }
+        for c in cols
+    ]
+
+@app.get("/v1/orders/{order_id}")
+def order_details(order_id: str, authorization: Optional[str] = Header(default=None)):
+    user_id = get_user_id_from_auth(authorization)
+    roles = get_user_roles(user_id)
+
+    with engine.begin() as conn:
+        order_row = conn.execute(select(orders).where(orders.c.id == order_id).limit(1)).first()
+        if not order_row:
+            raise HTTPException(status_code=404, detail="order not found")
+
+        order_dict = dict(order_row._mapping)
+
+        # العميل يشوف طلبه فقط
+        if "admin" not in roles and "vendor_admin" not in roles:
+            if str(order_dict.get("customer_id")) != str(user_id):
+                raise HTTPException(status_code=403, detail="not allowed")
+
+        items = conn.execute(select(order_items).where(order_items.c.order_id == order_id)).fetchall()
+        items_list = [dict(r._mapping) for r in items]
+
+        return {"order": order_dict, "items": items_list}
+
+
+@app.patch("/v1/orders/{order_id}/status")
+def update_order_status(
+    order_id: str,
+    body: Dict[str, Any],
+    authorization: Optional[str] = Header(default=None),
+):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "vendor_admin"])
+
+    new_status = body.get("status")
+    if not new_status:
+        raise HTTPException(status_code=400, detail="status is required")
+
+    allowed = {"pending", "accepted", "preparing", "out_for_delivery", "delivered", "cancelled"}
+    if new_status not in allowed:
+        raise HTTPException(status_code=400, detail=f"invalid status. allowed: {sorted(list(allowed))}")
+
+    with engine.begin() as conn:
+        res = conn.execute(
+            orders.update().where(orders.c.id == order_id).values(status=new_status)
+        )
+        if res.rowcount == 0:
+            raise HTTPException(status_code=404, detail="order not found")
+        return {"ok": True, "status": new_status}
+
+@app.get("/v1/service-requests/available")
+def available_service_requests(authorization: Optional[str] = Header(default=None)):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "courier"])
+
+    with engine.begin() as conn:
+        stmt = select(service_requests).where(service_requests.c.status == "pending").order_by(service_requests.c.created_at.desc()).limit(50)
+        rows = conn.execute(stmt).fetchall()
+        return [dict(r._mapping) for r in rows]
+
+
+@app.post("/v1/service-requests/{req_id}/accept")
+def accept_service_request(req_id: str, authorization: Optional[str] = Header(default=None)):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "courier"])
+
+    with engine.begin() as conn:
+        courier_id = resolve_courier_id(conn, user_id)
+
+        # نقبل فقط إذا still pending
+        res = conn.execute(
+            service_requests.update()
+            .where(service_requests.c.id == req_id)
+            .where(service_requests.c.status == "pending")
+            .values(status="accepted", courier_id=courier_id)
+        )
+        if res.rowcount == 0:
+            raise HTTPException(status_code=400, detail="request not found or not pending")
+        return {"ok": True, "status": "accepted"}
+
+
+@app.post("/v1/service-requests/{req_id}/complete")
+def complete_service_request(req_id: str, authorization: Optional[str] = Header(default=None)):
+    user_id = get_user_id_from_auth(authorization)
+    require_any_role(user_id, ["admin", "courier"])
+
+    with engine.begin() as conn:
+        courier_id = resolve_courier_id(conn, user_id)
+
+        res = conn.execute(
+            service_requests.update()
+            .where(service_requests.c.id == req_id)
+            .where(service_requests.c.courier_id == courier_id)
+            .values(status="completed")
+        )
+        if res.rowcount == 0:
+            raise HTTPException(status_code=400, detail="not allowed or not found")
+        return {"ok": True, "status": "completed"}
