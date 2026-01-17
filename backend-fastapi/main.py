@@ -313,6 +313,19 @@ def list_products(
 
         return items
 
+def pick_col(tbl: Table, candidates: list[str], required: bool = True) -> Optional[str]:
+    for c in candidates:
+        if c in tbl.c:
+            return c
+    if required:
+        raise HTTPException(
+            status_code=500,
+            detail=f"DB schema mismatch: {tbl.name} missing one of {candidates}"
+        )
+    return None
+
+
+
 @app.post("/v1/orders")
 def create_order(
     body: Dict[str, Any],
@@ -327,90 +340,119 @@ def create_order(
     vendor_branch_id = body.get("vendor_branch_id")
     address_id = body.get("address_id")
 
-    with engine.begin() as conn:
-        # نحسب total بشكل بسيط
-        total = 0
+    # ✅ اختَر الأعمدة الصح حسب سكيمة DB
+    customer_col = pick_col(orders, ["customer_user_id", "customer_id", "user_id", "profile_id"])
+    branch_col   = pick_col(orders, ["vendor_branch_id", "branch_id"])
+    address_col  = pick_col(orders, ["address_id", "delivery_address_id", "customer_address_id"], required=False)
+    status_col   = pick_col(orders, ["status"], required=False)
+    total_col    = pick_col(orders, ["total", "total_amount", "total_price", "amount_total"], required=False)
+    currency_col = pick_col(orders, ["currency"], required=False)
+    notes_col    = pick_col(orders, ["notes", "note"], required=False)
 
-        # جهز order row حسب الأعمدة الموجودة فعليًا
-        order_payload = only_existing_cols(orders, {
-            "customer_id": user_id,
-            "vendor_branch_id": vendor_branch_id,
-            "address_id": address_id,
-            "status": "pending",
-            "total": 0,  # نحدثه بعد الحساب
-            "currency": "YER",
-            "notes": body.get("notes"),
-        })
+    # أعمدة order_items
+    oi_order_col      = pick_col(order_items, ["order_id"])
+    oi_product_col    = pick_col(order_items, ["product_id"])
+    oi_qty_col        = pick_col(order_items, ["quantity", "qty", "count"])
+    oi_unit_price_col = pick_col(order_items, ["unit_price", "price"], required=False)
+    oi_total_col      = pick_col(order_items, ["total", "line_total", "total_price", "amount"], required=False)
+
+    # أعمدة الأسعار
+    inv_price_col = pick_col(branch_inventory, ["price_override", "price", "unit_price"], required=False)
+    prod_price_col = pick_col(products, ["price"], required=False)
+
+    with engine.begin() as conn:
+        total = 0.0
+
+        order_payload: Dict[str, Any] = {
+            customer_col: user_id,
+            branch_col: vendor_branch_id,
+        }
+        if address_col and address_id:
+            order_payload[address_col] = address_id
+        if status_col:
+            order_payload[status_col] = "pending"
+        if total_col:
+            order_payload[total_col] = 0
+        if currency_col:
+            order_payload[currency_col] = "YER"
+        if notes_col and body.get("notes") is not None:
+            order_payload[notes_col] = body.get("notes")
 
         new_order = conn.execute(
             insert(orders).values(**order_payload).returning(orders.c.id)
         ).first()
         order_id = new_order[0]
 
-        # إدخال order_items
         for it in items:
             product_id = it.get("product_id")
             qty = int(it.get("quantity", 1))
             if not product_id:
                 raise HTTPException(status_code=400, detail="product_id missing in items")
 
-            # سعر: من branch_inventory إذا موجود، وإلا من products.price لو موجود
-            unit_price = 0
+            unit_price = 0.0
 
+            # سعر من inventory
             if vendor_branch_id:
-                inv = conn.execute(
+                inv_row = conn.execute(
                     select(branch_inventory)
                     .where(branch_inventory.c.branch_id == vendor_branch_id)
                     .where(branch_inventory.c.product_id == product_id)
                     .limit(1)
                 ).first()
-                if inv:
-                    invd = dict(inv._mapping)
-                    unit_price = invd.get("price_override") or 0
+                if inv_row and inv_price_col:
+                    invd = dict(inv_row._mapping)
+                    unit_price = float(invd.get(inv_price_col) or 0)
 
-            if unit_price == 0 and "price" in products.c:
+            # fallback: سعر المنتج
+            if unit_price == 0 and prod_price_col:
                 pr = conn.execute(
-                    select(products.c.price).where(products.c.id == product_id).limit(1)
+                    select(getattr(products.c, prod_price_col))
+                    .where(products.c.id == product_id)
+                    .limit(1)
                 ).first()
                 if pr and pr[0] is not None:
-                    unit_price = pr[0]
+                    unit_price = float(pr[0])
 
-            line_total = float(unit_price) * qty
+            line_total = unit_price * qty
             total += line_total
 
-            item_payload = only_existing_cols(order_items, {
-                "order_id": order_id,
-                "product_id": product_id,
-                "quantity": qty,
-                "unit_price": unit_price,
-                "total": line_total,
-            })
+            item_payload: Dict[str, Any] = {
+                oi_order_col: order_id,
+                oi_product_col: product_id,
+                oi_qty_col: qty,
+            }
+            if oi_unit_price_col:
+                item_payload[oi_unit_price_col] = unit_price
+            if oi_total_col:
+                item_payload[oi_total_col] = line_total
 
             conn.execute(insert(order_items).values(**item_payload))
 
-        # تحديث total في orders لو العمود موجود
-        if "total" in orders.c:
+        # تحديث total
+        if total_col:
             conn.execute(
-                orders.update().where(orders.c.id == order_id).values(total=total)
+                orders.update().where(orders.c.id == order_id).values(**{total_col: total})
             )
 
         return {"id": str(order_id), "total": total}
 
 
+
 @app.get("/v1/orders/me")
-def my_orders(
-    authorization: Optional[str] = Header(default=None),
-):
+def my_orders(authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id_from_auth(authorization)
+    customer_col = pick_col(orders, ["customer_user_id", "customer_id", "user_id", "profile_id"])
 
     with engine.begin() as conn:
-        rows = conn.execute(
+        stmt = (
             select(orders)
-            .where(orders.c.customer_id == user_id)
+            .where(getattr(orders.c, customer_col) == user_id)
             .order_by(orders.c.created_at.desc())
             .limit(50)
-        ).fetchall()
+        )
+        rows = conn.execute(stmt).fetchall()
         return [dict(r._mapping) for r in rows]
+
 
 @app.get("/v1/_schema/{table_name}")
 def table_schema(table_name: str):
