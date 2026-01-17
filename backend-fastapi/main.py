@@ -52,7 +52,7 @@ meta = MetaData(schema="public")
 
 # Reflect tables
 categories = Table("categories", meta, autoload_with=engine)
-delivery_addresses = Table("delivery_addresses", meta, autoload_with=engine)
+addresses = Table("addresses", meta, autoload_with=engine)
 service_requests = Table("service_requests", meta, autoload_with=engine)
 
 vendors = Table("vendors", meta, autoload_with=engine)
@@ -187,7 +187,7 @@ def create_address(
 
     with engine.begin() as conn:
         res = conn.execute(
-            insert(delivery_addresses).values(**payload).returning(delivery_addresses.c.id)
+            insert(addresses).values(**payload).returning(addresses.c.id)
         ).first()
         return {"id": str(res[0])}
 
@@ -349,12 +349,12 @@ def create_order(
     if not vendor_branch_id:
         raise HTTPException(status_code=400, detail="vendor_branch_id is required")
 
-    # أعمدة أساسية (بعضها اختياري حسب السكيمة)
+    # orders columns
     customer_col = pick_col(orders, ["customer_user_id", "customer_id", "user_id", "profile_id"])
     branch_col   = pick_col(orders, ["vendor_branch_id", "branch_id"])
     status_col   = pick_col(orders, ["status"], required=False)
     total_col    = pick_col(orders, ["total", "total_amount", "total_price", "amount_total"], required=False)
-    type_col = pick_col(orders, ["type", "order_type", "kind"], required=False)
+    type_col     = pick_col(orders, ["type", "order_type", "kind"], required=False)
     currency_col = pick_col(orders, ["currency"], required=False)
     notes_col    = pick_col(orders, ["notes", "note"], required=False)
     address_col  = pick_col(orders, ["address_id", "delivery_address_id", "customer_address_id"], required=False)
@@ -366,46 +366,38 @@ def create_order(
     oi_unit_price_col = pick_col(order_items, ["unit_price", "price"], required=False)
     oi_total_col      = pick_col(order_items, ["total", "line_total", "total_price", "amount"], required=False)
 
-    # ====== Snapshot columns (order_items) ======
-    oi_name_snap_col = pick_col(order_items, ["name_snapshot", "product_name_snapshot", "title_snapshot"], required=False)
+    # snapshot columns
+    oi_name_snap_col  = pick_col(order_items, ["name_snapshot", "product_name_snapshot", "title_snapshot"], required=False)
     oi_price_snap_col = pick_col(order_items, ["price_snapshot", "unit_price_snapshot"], required=False)
     oi_currency_col   = pick_col(order_items, ["currency"], required=False)
     oi_image_snap_col = pick_col(order_items, ["image_snapshot", "image_url_snapshot", "thumbnail_snapshot"], required=False)
     oi_snapshot_col   = pick_col(order_items, ["product_snapshot", "item_snapshot", "snapshot"], required=False)
 
-    # ====== Product fields we can read ======
+    # product fields
     prod_name_col = pick_col(products, ["name", "title"], required=False)
     img_url_col   = pick_col(product_images, ["url", "image_url", "src"], required=False)
 
-# ====== Product fields we can read ======
-prod_name_col = pick_col(products, ["name", "title"], required=False)
-img_url_col   = pick_col(product_images, ["url", "image_url", "src"], required=False)
-
-
     try:
         with engine.begin() as conn:
-            # ✅ تأكد الفرع موجود + هات vendor_id منه
             vb = conn.execute(
-                select(vendor_branches.c.vendor_id).where(vendor_branches.c.id == vendor_branch_id).limit(1)
+                select(vendor_branches.c.vendor_id)
+                .where(vendor_branches.c.id == vendor_branch_id)
+                .limit(1)
             ).first()
             if not vb or not vb[0]:
                 raise HTTPException(status_code=400, detail="vendor_branch_id not found")
             vendor_id = str(vb[0])
 
-            order_payload: Dict[str, Any] = {}
+            order_payload: Dict[str, Any] = {
+                customer_col: user_id,
+                branch_col: vendor_branch_id,
+            }
 
-            # customer / branch
-            order_payload[customer_col] = user_id
-            order_payload[branch_col] = vendor_branch_id
-
-            # vendor_id (لو مطلوب في جدول orders)
             set_if_col(order_payload, orders, ["vendor_id", "store_id"], vendor_id)
 
-            # address
             if address_col and address_id:
                 order_payload[address_col] = address_id
 
-            # status/total/currency/notes
             if status_col:
                 order_payload[status_col] = body.get("status") or "placed"
             if type_col:
@@ -422,8 +414,7 @@ img_url_col   = pick_col(product_images, ["url", "image_url", "src"], required=F
             ).first()
             order_id = new_order[0]
 
-            # أسعار
-            inv_price_col = pick_col(branch_inventory, ["price_override", "price", "unit_price"], required=False)
+            inv_price_col  = pick_col(branch_inventory, ["price_override", "price", "unit_price"], required=False)
             prod_price_col = pick_col(products, ["price"], required=False)
 
             total = 0.0
@@ -465,7 +456,6 @@ img_url_col   = pick_col(product_images, ["url", "image_url", "src"], required=F
                     oi_qty_col: qty,
                 }
 
-                # ✅ لو order_items يحتاج vendor/branch
                 set_if_col(item_payload, order_items, ["vendor_branch_id", "branch_id"], vendor_branch_id)
                 set_if_col(item_payload, order_items, ["vendor_id", "store_id"], vendor_id)
 
@@ -474,8 +464,6 @@ img_url_col   = pick_col(product_images, ["url", "image_url", "src"], required=F
                 if oi_total_col:
                     item_payload[oi_total_col] = line_total
 
-                # --- get product name for snapshot ---
-                                # --- get product name for snapshot ---
                 product_name = None
                 if prod_name_col:
                     prn = conn.execute(
@@ -485,11 +473,9 @@ img_url_col   = pick_col(product_images, ["url", "image_url", "src"], required=F
                     ).first()
                     if prn and prn[0] is not None:
                         product_name = str(prn[0])
-
                 if not product_name:
                     product_name = "Product"
 
-                # --- get product image (optional) ---
                 image_url = ""
                 if img_url_col:
                     ir = conn.execute(
@@ -500,7 +486,6 @@ img_url_col   = pick_col(product_images, ["url", "image_url", "src"], required=F
                     if ir and ir[0] is not None:
                         image_url = str(ir[0])
 
-                # --- fill required snapshot cols if exist ---
                 if oi_name_snap_col:
                     item_payload[oi_name_snap_col] = product_name
                 if oi_price_snap_col:
@@ -517,11 +502,8 @@ img_url_col   = pick_col(product_images, ["url", "image_url", "src"], required=F
                         "qty": qty,
                     }
 
-
-
                 conn.execute(insert(order_items).values(**item_payload))
 
-            # تحديث total
             if total_col:
                 conn.execute(
                     orders.update().where(orders.c.id == order_id).values(**{total_col: total})
@@ -532,12 +514,12 @@ img_url_col   = pick_col(product_images, ["url", "image_url", "src"], required=F
     except HTTPException:
         raise
     except IntegrityError as e:
-        # ✅ هذا بيطلع لك السبب الحقيقي (NOT NULL / FK / unique...)
         raise HTTPException(status_code=400, detail=f"DB IntegrityError: {str(getattr(e, 'orig', e))}")
     except SQLAlchemyError as e:
         raise HTTPException(status_code=500, detail=f"DB Error: {str(e)}")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Unexpected Error: {str(e)}")
+
 
 
 
