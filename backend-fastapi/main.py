@@ -70,8 +70,11 @@ profiles = Table("profiles", meta, autoload_with=engine)
 def _get_jwks():
     global _jwks_cache
     if _jwks_cache is None:
-        with urllib.request.urlopen(JWKS_URL) as r:
-            _jwks_cache = json.load(r)
+        try:
+            with urllib.request.urlopen(JWKS_URL, timeout=10) as r:
+                _jwks_cache = json.load(r)
+        except Exception as e:
+            raise HTTPException(status_code=503, detail=f"Failed to fetch JWKS: {e}")
     return _jwks_cache
 
 def get_user_id_from_auth(authorization: Optional[str]) -> str:
@@ -79,28 +82,31 @@ def get_user_id_from_auth(authorization: Optional[str]) -> str:
         raise HTTPException(status_code=401, detail="Missing Bearer token")
 
     token = authorization.split(" ", 1)[1].strip()
-    header = jwt.get_unverified_header(token)
-    kid = header.get("kid")
-    alg = header.get("alg", "ES256")
 
-    jwks = _get_jwks()
-    key = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
+    try:
+        header = jwt.get_unverified_header(token)
+        kid = header.get("kid")
+        alg = header.get("alg", "ES256")
 
-    # 👇 لو ما لقا المفتاح، حدّث الكاش مرة واحدة
-    if not key:
-        global _jwks_cache
-        _jwks_cache = None
         jwks = _get_jwks()
-        key = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
+        jwk_dict = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
+        if not jwk_dict:
+            raise HTTPException(status_code=401, detail="Unknown token key (kid)")
 
-    if not key:
-        raise HTTPException(status_code=401, detail="Unknown token key (kid)")
+        key = jwk.construct(jwk_dict, algorithm=alg)
+        payload = jwt.decode(token, key, algorithms=[alg], options={"verify_aud": False})
 
-    payload = jwt.decode(token, key, algorithms=[alg], options={"verify_aud": False})
-    user_id = payload.get("sub")
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Token missing sub")
-    return user_id
+        user_id = payload.get("sub")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="Token missing sub")
+        return user_id
+
+    except HTTPException:
+        raise
+    except JWTError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
 
 
 def only_existing_cols(table: Table, data: Dict[str, Any]) -> Dict[str, Any]:
@@ -524,10 +530,12 @@ def complete_service_request(req_id: str, authorization: Optional[str] = Header(
 # =========================
 
 def _best_owner_col(tbl: Table) -> Optional[str]:
+    # أسماء أعمدة المالك المحتملة (حسب سكيمتك)
     for c in ["owner_user_id", "owner_id", "user_id", "profile_id", "created_by"]:
         if c in tbl.c:
             return c
     return None
+
 
 
 def _order_col(tbl: Table) -> Any:
