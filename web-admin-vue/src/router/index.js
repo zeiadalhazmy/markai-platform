@@ -1,75 +1,86 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { supabase } from "../lib/supabase";
+import { getUserRole, ensureProfileDefaultRole } from "../lib/profile";
 
-import LoginView from "../views/auth/LoginView.vue";
-import VerifyOtpView from "../views/auth/VerifyOtpView.vue";
-import RolePickView from "../views/RolePickView.vue";
+import AppShell from "../layouts/AppShell.vue";
 
-import ClientHome from "../views/client/ClientHome.vue";
-import MerchantHome from "../views/merchant/MerchantHome.vue";
-import CourierHome from "../views/courier/CourierHome.vue";
-import AdminHome from "../views/admin/AdminHome.vue";
+// Auth
+import LoginView from "../views/LoginView.vue"; // غيّره لو اسم ملفك مختلف
 
-// (لو عندك صفحات الأدمن القديمة)
-import ProductsView from "../views/ProductsView.vue";
-import OrdersMeView from "../views/OrdersMeView.vue";
+// Client
+import ClientHome from "../views/client/HomeView.vue";
+import ClientProducts from "../views/client/ProductsView.vue";
+import ClientOrders from "../views/client/OrdersView.vue";
 
+// Merchant
+import MerchantHome from "../views/merchant/HomeView.vue";
+import MerchantProducts from "../views/merchant/ProductsView.vue";
+import MerchantOrders from "../views/merchant/OrdersView.vue";
 
+// Courier
+import CourierHome from "../views/courier/HomeView.vue";
+import CourierTasks from "../views/courier/TasksView.vue";
 
-
-async function getMyRole(){
-  const { data } = await supabase.auth.getUser();
-  const user = data?.user;
-  if(!user) return null;
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .maybeSingle();
-
-  return profile?.role || null;
-}
+// Admin (تقدر توصلها لاحقاً)
+import AdminHome from "../views/admin/HomeView.vue";
 
 const routes = [
+  { path: "/", redirect: "/auth" },
   { path: "/auth", component: LoginView },
-  { path: "/auth/verify", component: VerifyOtpView },
 
-  { path: "/role", component: RolePickView, meta: { requiresAuth: true } },
+  // كل التطبيق داخل AppShell
+  {
+    path: "/",
+    component: AppShell,
+    meta: { requiresAuth: true },
+    children: [
+      { path: "client", component: ClientHome, meta: { role: ["customer"] } },
+      { path: "client/products", component: ClientProducts, meta: { role: ["customer"] } },
+      { path: "client/orders", component: ClientOrders, meta: { role: ["customer"] } },
 
-  { path: "/client", component: ClientHome, meta: { requiresAuth: true, roles: ["client"] } },
-  { path: "/merchant", component: MerchantHome, meta: { requiresAuth: true, roles: ["merchant"] } },
-  { path: "/courier", component: CourierHome, meta: { requiresAuth: true, roles: ["courier"] } },
+      { path: "merchant", component: MerchantHome, meta: { role: ["merchant"] } },
+      { path: "merchant/products", component: MerchantProducts, meta: { role: ["merchant"] } },
+      { path: "merchant/orders", component: MerchantOrders, meta: { role: ["merchant"] } },
 
-  { path: "/admin", component: AdminHome, meta: { requiresAuth: true, roles: ["admin"] } },
+      { path: "courier", component: CourierHome, meta: { role: ["courier"] } },
+      { path: "courier/tasks", component: CourierTasks, meta: { role: ["courier"] } },
 
-  // صفحات أدمن موجودة عندك (لو تبغاها تحت /admin)
-  { path: "/admin/products", component: ProductsView, meta: { requiresAuth: true, roles: ["admin"] } },
-  { path: "/admin/orders", component: OrdersMeView, meta: { requiresAuth: true, roles: ["admin"] } },
-
-  
-
-  { path: "/", redirect: "/auth" }
+      { path: "admin", component: AdminHome, meta: { role: ["admin"] } },
+    ],
+  },
 ];
 
 const router = createRouter({
   history: createWebHistory(),
-  routes
+  routes,
 });
 
 router.beforeEach(async (to) => {
+  const requiresAuth = to.matched.some(r => r.meta?.requiresAuth);
+  const roleNeeded = to.meta?.role;
+
   const { data } = await supabase.auth.getSession();
   const session = data.session;
 
-  if(to.meta.requiresAuth && !session){
-    return "/auth";
+  if (requiresAuth && !session) return "/auth";
+
+  if (session) {
+    // أنشئ profile افتراضي (customer) أول مرة
+    await ensureProfileDefaultRole();
   }
 
-  if(to.meta.requiresAuth && to.meta.roles){
-    const role = await getMyRole();
-    if(!role) return "/role";
-    if(!to.meta.roles.includes(role)) return "/role";
+  if (session && roleNeeded?.length) {
+    const role = await getUserRole();
+    if (!roleNeeded.includes(role)) {
+      // رده لصفحته الصحيحة
+      if (role === "merchant") return "/merchant";
+      if (role === "courier") return "/courier";
+      if (role === "admin") return "/admin";
+      return "/client";
+    }
   }
+
+  return true;
 });
 
 export default router;
