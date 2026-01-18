@@ -9,22 +9,27 @@
       <li><router-link to="/products">Products (Public)</router-link></li>
       <li><router-link to="/orders-me">My Orders (Auth)</router-link></li>
 
-      <li style="margin-top:12px;"><b>Admin</b></li>
-      <li><router-link to="/admin/vendors">Admin Vendors</router-link></li>
-      <li><router-link to="/admin/branches">Admin Branches</router-link></li>
-      <li><router-link to="/admin/products">Admin Products</router-link></li>
-      <li><router-link to="/admin/orders">Admin Orders</router-link></li>
-      <li><router-link to="/admin/vendors">Admin Vendors</router-link></li>
-<li><router-link to="/admin/branches">Admin Branches</router-link></li>
-<li><router-link to="/addresses">My Addresses (Auth)</router-link></li>
-<li><router-link to="/checkout">Checkout / Create Order (Auth)</router-link></li>
-<li><router-link to="/service-requests">Service Requests (Auth)</router-link></li>
-<li><router-link to="/courier">Courier Panel (Role)</router-link></li>
-
+      <!-- ✅ الجديد -->
+      <li><router-link to="/admin/vendors">My Vendors (Admin/Merchant)</router-link></li>
+      <li><router-link to="/admin/branches">My Branches (Admin/Merchant)</router-link></li>
+      <li><router-link to="/admin/inventory">Inventory (Admin/Merchant)</router-link></li>
 
     </ul>
 
     <p v-if="sessionEmail">Logged as: {{ sessionEmail }}</p>
+
+    <!-- ✅ يطلع لك Vendor IDs حقّك -->
+    <div v-if="vendorIds.length" style="margin-top:14px;padding:10px;border:1px solid #ddd">
+      <b>Your Vendor IDs:</b>
+      <div v-for="id in vendorIds" :key="id" style="font-family:monospace">
+        {{ id }}
+      </div>
+      <small>انسخ واحد منها وحطه في صفحة إنشاء المنتجات/الفروع.</small>
+    </div>
+
+    <p v-if="vendorErr" style="color:#b00020;margin-top:10px">
+      {{ vendorErr }}
+    </p>
   </div>
 </template>
 
@@ -32,13 +37,27 @@
 import { ref, onMounted } from "vue";
 import { supabase } from "../lib/supabase";
 import { useRouter } from "vue-router";
+import api from "../lib/api"; // ✅
 
 const router = useRouter();
 const sessionEmail = ref("");
 
+const vendorIds = ref([]);
+const vendorErr = ref("");
+
 onMounted(async () => {
   const { data } = await supabase.auth.getSession();
   sessionEmail.value = data.session?.user?.email || "";
+
+  // ✅ نجيب vendor_ids من API (يتطلب admin/merchant role)
+  try {
+    const res = await api.get("/v1/vendor-admin/me");
+    vendorIds.value = res.data?.vendor_ids || [];
+  } catch (e) {
+    vendorErr.value =
+      e?.response?.data?.detail ||
+      "Could not load vendor ids (need admin/merchant role).";
+  }
 });
 
 async function logout() {

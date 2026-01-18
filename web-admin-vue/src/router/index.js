@@ -9,11 +9,21 @@ import LoginView from "../views/LoginView.vue";
 import DashboardView from "../views/DashboardView.vue";
 import OrdersMeView from "../views/OrdersMeView.vue";
 import ProductsView from "../views/ProductsView.vue";
+import VendorsView from "../views/VendorsView.vue";
+import BranchesView from "../views/BranchesView.vue";
+import InventoryView from "../views/InventoryView.vue";
+
+
 
 const routes = [
   { path: "/login", component: LoginView },
   { path: "/", component: DashboardView, meta: { requiresAuth: true } },
   { path: "/orders-me", component: OrdersMeView, meta: { requiresAuth: true } },
+  { path: "/admin/vendors", component: VendorsView },
+  { path: "/admin/inventory", component: InventoryView },
+
+{ path: "/admin/branches", component: BranchesView },
+
   { path: "/products", component: ProductsView }, // public endpoint
   {
   path: "/admin/vendors",

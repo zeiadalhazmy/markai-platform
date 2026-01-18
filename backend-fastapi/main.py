@@ -43,6 +43,12 @@ def root():
 def health():
     return {"status": "ok"}
 
+@app.get("/v1/me")
+def me(authorization: Optional[str] = Header(default=None)):
+    user_id = get_user_id_from_auth(authorization)
+    roles = sorted(list(get_user_roles(user_id)))
+    return {"user_id": user_id, "roles": roles}
+
 
 def only_existing_cols(table: Table, data: Dict[str, Any]) -> Dict[str, Any]:
     cols = set(table.c.keys())
