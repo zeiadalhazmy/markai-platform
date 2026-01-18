@@ -24,6 +24,12 @@ import CourierTasks from "../views/courier/TasksView.vue";
 // Admin (تقدر توصلها لاحقاً)
 import AdminHome from "../views/admin/HomeView.vue";
 
+import "./assets/theme.css";
+import "./assets/ui.css";
+
+
+
+
 const routes = [
   { path: "/", redirect: "/auth" },
   { path: "/auth", component: LoginView },
