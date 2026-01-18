@@ -70,11 +70,7 @@ const routes = [
   name: "courier",
   component: () => import("../views/CourierView.vue"),
 },
-{
-  path: "/addresses",
-  name: "addresses",
-  component: () => import("../views/AddressesView.vue"),
-},
+
 
 
 
