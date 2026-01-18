@@ -3,7 +3,7 @@ from typing import Optional, Any, Dict
 
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import select, insert, inspect
+from sqlalchemy import select, insert, inspect, Table
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 from app.api import router as api_router
@@ -15,6 +15,7 @@ from app.infrastructure.db import (
     vendors, vendor_branches, products, product_images, branch_inventory,
     orders, order_items, user_roles, couriers, profiles
 )
+
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://hcakrxaaarkufkxrehwy.supabase.co")
 JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
@@ -41,79 +42,6 @@ def root():
 @app.get("/health")
 def health():
     return {"status": "ok"}
-
-
-# DB + JWT
-DATABASE_URL = os.getenv("DATABASE_URL", "")
-
-if not DATABASE_URL:
-    raise RuntimeError("DATABASE_URL is missing")
-
-engine: Engine = create_engine(DATABASE_URL, pool_pre_ping=True)
-meta = MetaData(schema="public")
-
-# Reflect tables
-categories = Table("categories", meta, autoload_with=engine)
-
-insp = inspect(engine)
-ADDRESS_TABLE = "delivery_addresses" if insp.has_table("delivery_addresses", schema="public") else "addresses"
-addresses = Table(ADDRESS_TABLE, meta, autoload_with=engine)
-
-service_requests = Table("service_requests", meta, autoload_with=engine)
-
-vendors = Table("vendors", meta, autoload_with=engine)
-vendor_branches = Table("vendor_branches", meta, autoload_with=engine)
-products = Table("products", meta, autoload_with=engine)
-product_images = Table("product_images", meta, autoload_with=engine)
-branch_inventory = Table("branch_inventory", meta, autoload_with=engine)
-orders = Table("orders", meta, autoload_with=engine)
-order_items = Table("order_items", meta, autoload_with=engine)
-user_roles = Table("user_roles", meta, autoload_with=engine)
-couriers = Table("couriers", meta, autoload_with=engine)
-profiles = Table("profiles", meta, autoload_with=engine)
-
-
-
-def _get_jwks():
-    global _jwks_cache
-    if _jwks_cache is None:
-        try:
-            with urllib.request.urlopen(JWKS_URL, timeout=10) as r:
-                _jwks_cache = json.load(r)
-        except Exception as e:
-            raise HTTPException(status_code=503, detail=f"Failed to fetch JWKS: {e}")
-    return _jwks_cache
-
-def get_user_id_from_auth(authorization: Optional[str]) -> str:
-    if not authorization or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Missing Bearer token")
-
-    token = authorization.split(" ", 1)[1].strip()
-
-    try:
-        header = jwt.get_unverified_header(token)
-        kid = header.get("kid")
-        alg = header.get("alg", "ES256")
-
-        jwks = _get_jwks()
-        jwk_dict = next((k for k in jwks.get("keys", []) if k.get("kid") == kid), None)
-        if not jwk_dict:
-            raise HTTPException(status_code=401, detail="Unknown token key (kid)")
-
-        key = jwk.construct(jwk_dict, algorithm=alg)
-        payload = jwt.decode(token, key.to_pem().decode("utf-8"), algorithms=[alg], options={"verify_aud": False})
-
-        user_id = payload.get("sub")
-        if not user_id:
-            raise HTTPException(status_code=401, detail="Token missing sub")
-        return user_id
-
-    except HTTPException:
-        raise
-    except JWTError as e:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
-    except Exception as e:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {e}")
 
 
 def only_existing_cols(table: Table, data: Dict[str, Any]) -> Dict[str, Any]:
