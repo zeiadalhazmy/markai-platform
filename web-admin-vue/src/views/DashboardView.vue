@@ -8,6 +8,12 @@
     <ul>
       <li><router-link to="/products">Products (Public)</router-link></li>
       <li><router-link to="/orders-me">My Orders (Auth)</router-link></li>
+
+      <li style="margin-top:12px;"><b>Admin</b></li>
+      <li><router-link to="/admin/vendors">Admin Vendors</router-link></li>
+      <li><router-link to="/admin/branches">Admin Branches</router-link></li>
+      <li><router-link to="/admin/products">Admin Products</router-link></li>
+      <li><router-link to="/admin/orders">Admin Orders</router-link></li>
     </ul>
 
     <p v-if="sessionEmail">Logged as: {{ sessionEmail }}</p>
