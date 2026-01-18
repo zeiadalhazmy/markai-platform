@@ -1,104 +1,66 @@
 <template>
-  <div class="section">
-    <div class="container">
-      <div class="row-between">
-        <div>
-          <div class="row" style="gap:10px;">
-            <div class="badge">
-              <span style="width:10px;height:10px;border-radius:99px;background:var(--primary);display:inline-block;"></span>
-              MarkAi
-            </div>
-            <div class="badge" v-if="role">{{ roleLabel }}</div>
-          </div>
-          <div class="muted" style="margin-top:6px" v-if="email">{{ email }}</div>
-        </div>
+  <div class="shell">
+    <aside class="side card">
+      <div class="brand">
+        <div class="logo">ماركاي</div>
+        <div class="muted">{{ roleLabel }}</div>
+      </div>
 
+      <nav class="nav">
+        <router-link v-for="i in items" :key="i.to" :to="i.to" class="navItem">
+          <span>{{ i.label }}</span>
+        </router-link>
+      </nav>
+
+      <div class="footer">
         <button class="btn btn-ghost" @click="logout">خروج</button>
       </div>
+    </aside>
 
-      <div class="divider"></div>
-
-      <div class="grid2" style="grid-template-columns: 260px 1fr;">
-        <!-- Side menu -->
-        <aside class="card p16" style="height: fit-content;">
-          <div class="h2">القائمة</div>
-
-          <div v-if="loading">
-            <div class="skeleton" style="height:14px;margin:10px 0;"></div>
-            <div class="skeleton" style="height:14px;margin:10px 0;width:80%"></div>
-            <div class="skeleton" style="height:14px;margin:10px 0;width:60%"></div>
-          </div>
-
-          <ul v-else style="list-style:none;padding:0;margin:10px 0;display:flex;flex-direction:column;gap:10px;">
-            <li v-for="item in menu" :key="item.to">
-              <router-link
-                :to="item.to"
-                class="btn btn-ghost"
-                style="display:block;text-align:start;width:100%;"
-              >
-                {{ item.label }}
-              </router-link>
-            </li>
-          </ul>
-        </aside>
-
-        <!-- Page -->
-        <main style="min-width:0;">
-          <router-view />
-        </main>
-      </div>
-    </div>
+    <main class="main">
+      <router-view />
+    </main>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from "vue";
+import { computed, ref, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { supabase } from "../lib/supabase";
 import { getUserRole } from "../lib/profile";
 import { ROLE_LABEL } from "../lib/roles";
 
 const router = useRouter();
-const role = ref(null);
-const email = ref("");
-const loading = ref(true);
+const role = ref("customer");
+
+onMounted(async () => {
+  role.value = (await getUserRole()) || "customer";
+});
 
 const roleLabel = computed(() => ROLE_LABEL[role.value] || role.value);
 
-const menu = computed(() => {
-  switch (role.value) {
-    case "merchant":
-      return [
-        { label: "الرئيسية", to: "/merchant" },
-        { label: "منتجاتي", to: "/merchant/products" },
-        { label: "طلبات الزبائن", to: "/merchant/orders" },
-      ];
-    case "courier":
-      return [
-        { label: "الرئيسية", to: "/courier" },
-        { label: "المهام", to: "/courier/tasks" },
-      ];
-    case "admin":
-      return [
-        { label: "الرئيسية", to: "/admin" },
-        { label: "إدارة المستخدمين", to: "/admin/users" },
-        { label: "الطلبات", to: "/admin/orders" },
-        { label: "المنتجات", to: "/admin/products" },
-      ];
-    default:
-      return [
-        { label: "الرئيسية", to: "/client" },
-        { label: "المنتجات", to: "/client/products" },
-        { label: "طلباتي", to: "/client/orders" },
-      ];
+const items = computed(() => {
+  if (role.value === "merchant") {
+    return [
+      { to: "/merchant", label: "الرئيسية" },
+      { to: "/merchant/products", label: "المنتجات" },
+      { to: "/merchant/orders", label: "الطلبات" },
+    ];
   }
-});
-
-onMounted(async () => {
-  const { data } = await supabase.auth.getSession();
-  email.value = data.session?.user?.email || data.session?.user?.phone || "";
-  role.value = await getUserRole();
-  loading.value = false;
+  if (role.value === "courier") {
+    return [
+      { to: "/courier", label: "الرئيسية" },
+      { to: "/courier/tasks", label: "المهام" },
+    ];
+  }
+  if (role.value === "admin") {
+    return [{ to: "/admin", label: "لوحة الإدارة" }];
+  }
+  return [
+    { to: "/client", label: "الرئيسية" },
+    { to: "/client/products", label: "المنتجات" },
+    { to: "/client/orders", label: "طلباتي" },
+  ];
 });
 
 async function logout() {
@@ -108,7 +70,38 @@ async function logout() {
 </script>
 
 <style scoped>
-@media (max-width: 900px){
-  .grid2{ grid-template-columns: 1fr !important; }
+.shell{
+  display:grid;
+  grid-template-columns: 280px 1fr;
+  gap:14px;
+  padding: 14px;
+}
+.side{
+  padding: 14px;
+  height: calc(100vh - 28px);
+  position: sticky;
+  top: 14px;
+  display:flex;
+  flex-direction: column;
+}
+.brand{ padding: 10px 10px 14px; border-bottom: 1px solid var(--border); }
+.logo{ font-weight: 900; font-size: 22px; letter-spacing: .5px; }
+.nav{ display:flex; flex-direction: column; gap: 8px; padding: 14px 6px; }
+.navItem{
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid transparent;
+  background: rgba(255,255,255,.04);
+}
+.navItem.router-link-active{
+  border-color: rgba(77,214,165,.45);
+  background: rgba(77,214,165,.12);
+}
+.footer{ margin-top:auto; padding-top: 12px; border-top: 1px solid var(--border); }
+
+.main{ padding: 8px; }
+@media (max-width: 980px){
+  .shell{ grid-template-columns: 1fr; }
+  .side{ height:auto; position: relative; }
 }
 </style>

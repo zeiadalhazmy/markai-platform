@@ -1,52 +1,52 @@
 import { supabase } from "./supabase";
+import { ROLES } from "./roles";
 
 export async function getUserRole() {
   const { data: s } = await supabase.auth.getSession();
-  const userId = s.session?.user?.id;
-  if (!userId) return null;
+  const uid = s.session?.user?.id;
+  if (!uid) return null;
 
   const { data, error } = await supabase
     .from("profiles")
     .select("role")
-    .eq("id", userId)
+    .eq("id", uid)
     .single();
 
   if (error) return null;
-  return data?.role ?? null;
+  return data?.role || null;
 }
 
 export async function ensureProfileDefaultRole() {
   const { data: s } = await supabase.auth.getSession();
-  const userId = s.session?.user?.id;
-  if (!userId) return;
+  const user = s.session?.user;
+  if (!user) return;
 
+  // إذا ما عنده profile، أنشئه بـ customer
   const { data } = await supabase
     .from("profiles")
     .select("id, role")
-    .eq("id", userId)
-    .single();
+    .eq("id", user.id)
+    .maybeSingle();
 
-  // لو ما لقا سجل (لسبب ما) أنشئه
-  if (!data?.id) {
-    await supabase.from("profiles").insert({ id: userId, role: "customer" });
-    return;
-  }
-
-  // لو role فاضي
-  if (!data.role) {
-    await supabase.from("profiles").update({ role: "customer" }).eq("id", userId);
+  if (!data) {
+    await supabase.from("profiles").insert({
+      id: user.id,
+      role: ROLES.CUSTOMER,
+      email: user.email ?? null,
+      phone: user.phone ?? null,
+    });
   }
 }
 
-export async function setMyRole(role) {
+export async function setUserRole(role) {
   const { data: s } = await supabase.auth.getSession();
-  const userId = s.session?.user?.id;
-  if (!userId) throw new Error("No session");
+  const uid = s.session?.user?.id;
+  if (!uid) throw new Error("No session");
 
-  const { error } = await supabase
-    .from("profiles")
-    .update({ role })
-    .eq("id", userId);
+  const { error } = await supabase.from("profiles").upsert({
+    id: uid,
+    role,
+  });
 
   if (error) throw error;
 }
