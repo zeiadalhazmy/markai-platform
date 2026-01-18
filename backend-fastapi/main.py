@@ -1,17 +1,20 @@
-import os, json, urllib.request
-
+import os
 from typing import Optional, Any, Dict
 
 from fastapi import FastAPI, Header, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import create_engine, MetaData, Table, select, insert, inspect
-from sqlalchemy.engine import Engine
-from jose import jwt, jwk
-from jose.exceptions import JWTError
+from sqlalchemy import select, insert, inspect
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
-
 from app.api import router as api_router
+from app.core_app.config import settings
+from app.core_app.security import get_user_id_from_auth
+from app.infrastructure.db import (
+    engine,
+    categories, addresses, service_requests,
+    vendors, vendor_branches, products, product_images, branch_inventory,
+    orders, order_items, user_roles, couriers, profiles
+)
 
 SUPABASE_URL = os.getenv("SUPABASE_URL", "https://hcakrxaaarkufkxrehwy.supabase.co")
 JWKS_URL = f"{SUPABASE_URL}/auth/v1/.well-known/jwks.json"
@@ -20,9 +23,8 @@ _jwks_cache = None
 
 app = FastAPI(title="MarkAi Core API", version="1.0.0")
 
-# CORS
-cors = os.environ.get("CORS_ORIGINS", "*")
-origins = ["*"] if cors.strip() == "*" else [o.strip() for o in cors.split(",")]
+origins = settings.cors_origins_list
+
 
 app.add_middleware(
     CORSMiddleware,

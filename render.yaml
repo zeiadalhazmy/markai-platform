@@ -1,0 +1,23 @@
+services:
+  - type: web
+    name: markai-api
+    env: python
+    rootDir: backend-fastapi
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    plan: free
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: CORS_ORIGINS
+        sync: false
+
+  - type: web
+    name: markai-node-service
+    env: node
+    rootDir: service-node-express
+    buildCommand: npm ci
+    startCommand: node src/index.js
+    plan: free
