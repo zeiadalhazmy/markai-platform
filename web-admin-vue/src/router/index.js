@@ -14,6 +14,9 @@ import AdminHome from "../views/admin/AdminHome.vue";
 import ProductsView from "../views/ProductsView.vue";
 import OrdersMeView from "../views/OrdersMeView.vue";
 
+
+
+
 async function getMyRole(){
   const { data } = await supabase.auth.getUser();
   const user = data?.user;
@@ -43,6 +46,8 @@ const routes = [
   // صفحات أدمن موجودة عندك (لو تبغاها تحت /admin)
   { path: "/admin/products", component: ProductsView, meta: { requiresAuth: true, roles: ["admin"] } },
   { path: "/admin/orders", component: OrdersMeView, meta: { requiresAuth: true, roles: ["admin"] } },
+
+  
 
   { path: "/", redirect: "/auth" }
 ];
