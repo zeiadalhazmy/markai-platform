@@ -1,3 +1,6 @@
+
 <template>
-  <router-view />
+  <div dir="rtl">
+    <router-view />
+  </div>
 </template>

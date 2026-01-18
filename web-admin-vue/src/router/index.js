@@ -1,104 +1,70 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { supabase } from "../lib/supabase";
 
-import VendorsAdminView from "../views/VendorsAdminView.vue";
-import BranchesAdminView from "../views/BranchesAdminView.vue";
-import ProductsAdminView from "../views/ProductsAdminView.vue";
-import OrdersAdminView from "../views/OrdersAdminView.vue";
-import LoginView from "../views/LoginView.vue";
-import DashboardView from "../views/DashboardView.vue";
-import OrdersMeView from "../views/OrdersMeView.vue";
+import LoginView from "../views/auth/LoginView.vue";
+import VerifyOtpView from "../views/auth/VerifyOtpView.vue";
+import RolePickView from "../views/RolePickView.vue";
+
+import ClientHome from "../views/client/ClientHome.vue";
+import MerchantHome from "../views/merchant/MerchantHome.vue";
+import CourierHome from "../views/courier/CourierHome.vue";
+import AdminHome from "../views/admin/AdminHome.vue";
+
+// (لو عندك صفحات الأدمن القديمة)
 import ProductsView from "../views/ProductsView.vue";
-import VendorsView from "../views/VendorsView.vue";
-import BranchesView from "../views/BranchesView.vue";
-import InventoryView from "../views/InventoryView.vue";
+import OrdersMeView from "../views/OrdersMeView.vue";
 
+async function getMyRole(){
+  const { data } = await supabase.auth.getUser();
+  const user = data?.user;
+  if(!user) return null;
 
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  return profile?.role || null;
+}
 
 const routes = [
-  { path: "/login", component: LoginView },
-  { path: "/", component: DashboardView, meta: { requiresAuth: true } },
-  { path: "/orders-me", component: OrdersMeView, meta: { requiresAuth: true } },
-  { path: "/admin/vendors", component: VendorsView },
-  { path: "/admin/inventory", component: InventoryView },
+  { path: "/auth", component: LoginView },
+  { path: "/auth/verify", component: VerifyOtpView },
 
-{ path: "/admin/branches", component: BranchesView },
+  { path: "/role", component: RolePickView, meta: { requiresAuth: true } },
 
-  { path: "/products", component: ProductsView }, // public endpoint
-  {
-  path: "/admin/vendors",
-  name: "AdminVendors",
-  component: VendorsAdminView,
-},
-{
-  path: "/admin/branches",
-  name: "AdminBranches",
-  component: BranchesAdminView,
-},
-{
-  path: "/admin/products",
-  name: "AdminProducts",
-  component: ProductsAdminView,
-},
-{
-  path: "/admin/orders",
-  name: "AdminOrders",
-  component: OrdersAdminView,
-},
-{
-  path: "/admin/vendors",
-  name: "admin-vendors",
-  component: () => import("../views/AdminVendorsView.vue"),
-},
-{
-  path: "/admin/branches",
-  name: "admin-branches",
-  component: () => import("../views/AdminBranchesView.vue"),
-},
-{
-  path: "/admin/products",
-  name: "admin-products",
-  component: () => import("../views/AdminProductsView.vue"),
-},
-{
-  path: "/addresses",
-  name: "addresses",
-  component: () => import("../views/AddressesView.vue"),
-},
-{
-  path: "/checkout",
-  name: "checkout",
-  component: () => import("../views/CheckoutView.vue"),
-},
-{
-  path: "/service-requests",
-  name: "service-requests",
-  component: () => import("../views/ServiceRequestsView.vue"),
-},
-{
-  path: "/courier",
-  name: "courier",
-  component: () => import("../views/CourierView.vue"),
-},
+  { path: "/client", component: ClientHome, meta: { requiresAuth: true, roles: ["client"] } },
+  { path: "/merchant", component: MerchantHome, meta: { requiresAuth: true, roles: ["merchant"] } },
+  { path: "/courier", component: CourierHome, meta: { requiresAuth: true, roles: ["courier"] } },
 
+  { path: "/admin", component: AdminHome, meta: { requiresAuth: true, roles: ["admin"] } },
 
+  // صفحات أدمن موجودة عندك (لو تبغاها تحت /admin)
+  { path: "/admin/products", component: ProductsView, meta: { requiresAuth: true, roles: ["admin"] } },
+  { path: "/admin/orders", component: OrdersMeView, meta: { requiresAuth: true, roles: ["admin"] } },
 
-
-
+  { path: "/", redirect: "/auth" }
 ];
 
 const router = createRouter({
   history: createWebHistory(),
-  routes,
+  routes
 });
 
 router.beforeEach(async (to) => {
-  if (!to.meta.requiresAuth) return true;
-
   const { data } = await supabase.auth.getSession();
-  if (!data.session) return "/login";
-  return true;
+  const session = data.session;
+
+  if(to.meta.requiresAuth && !session){
+    return "/auth";
+  }
+
+  if(to.meta.requiresAuth && to.meta.roles){
+    const role = await getMyRole();
+    if(!role) return "/role";
+    if(!to.meta.roles.includes(role)) return "/role";
+  }
 });
 
 export default router;
-
