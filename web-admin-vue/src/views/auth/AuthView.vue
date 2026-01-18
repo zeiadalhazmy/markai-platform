@@ -1,20 +1,31 @@
 <template>
   <div class="section">
     <div class="container">
-      <div class="card" style="padding:22px; max-width:520px; margin: 0 auto;">
+      <div class="card" style="padding:22px; max-width:520px; margin:0 auto;">
         <h1 class="h1">تسجيل الدخول</h1>
-        <div class="muted">أدخل رقمك أو إيميلك — بنرسل لك كود OTP</div>
+        <div class="muted">OTP عبر Supabase</div>
 
-        <div style="margin-top:14px;">
-          <input class="input" v-model="identity" placeholder="رقم هاتف أو بريد إلكتروني" />
+        <div class="row" style="margin-top:14px;">
+          <button class="btn" :class="{ 'btn-primary': mode==='phone' }" @click="mode='phone'">هاتف</button>
+          <button class="btn" :class="{ 'btn-primary': mode==='email' }" @click="mode='email'">إيميل</button>
+        </div>
+
+        <div style="margin-top:12px;">
+          <div class="muted" v-if="mode==='phone'">رقم الهاتف (مثال: +9677xxxxxxx)</div>
+          <div class="muted" v-else>البريد الإلكتروني</div>
+
+          <input class="input" v-model="value" :placeholder="mode==='phone' ? '+9677...' : 'name@email.com'" />
         </div>
 
         <div class="row" style="margin-top:12px;">
-          <button class="btn btn-primary" :disabled="loading || !identity" @click="sendOtp">
+          <button class="btn btn-primary" :disabled="loading" @click="sendOtp">
             {{ loading ? "جاري الإرسال..." : "إرسال الكود" }}
           </button>
-          <span class="muted" v-if="msg">{{ msg }}</span>
+          <router-link class="btn btn-ghost" to="/">الرئيسية</router-link>
         </div>
+
+        <div class="muted" v-if="msg" style="margin-top:10px;">{{ msg }}</div>
+        <div class="muted" v-if="err" style="margin-top:10px; color: var(--danger);">{{ err }}</div>
       </div>
     </div>
   </div>
@@ -26,30 +37,37 @@ import { useRouter } from "vue-router";
 import { supabase } from "../../lib/supabase";
 
 const router = useRouter();
-const identity = ref("");
+
+const mode = ref("phone"); // phone | email
+const value = ref("");
 const loading = ref(false);
 const msg = ref("");
-
-function isEmail(v){ return /\S+@\S+\.\S+/.test(v); }
+const err = ref("");
 
 async function sendOtp(){
   loading.value = true;
   msg.value = "";
+  err.value = "";
   try{
-    const v = identity.value.trim();
+    const v = value.value.trim();
+    if (!v) throw new Error("أدخل القيمة أولاً");
 
-    const payload = isEmail(v)
-      ? { email: v, options: { shouldCreateUser: true } }
-      : { phone: v, options: { shouldCreateUser: true, channel: "sms" } };
+    if (mode.value === "phone") {
+      sessionStorage.setItem("otp_mode", "phone");
+      sessionStorage.setItem("otp_value", v);
+      const { error } = await supabase.auth.signInWithOtp({ phone: v });
+      if (error) throw error;
+    } else {
+      sessionStorage.setItem("otp_mode", "email");
+      sessionStorage.setItem("otp_value", v);
+      const { error } = await supabase.auth.signInWithOtp({ email: v });
+      if (error) throw error;
+    }
 
-    const { error } = await supabase.auth.signInWithOtp(payload);
-    if (error) throw error;
-
-    sessionStorage.setItem("otp_identity", v);
     msg.value = "تم إرسال الكود ✅";
     router.push("/auth/verify");
   }catch(e){
-    msg.value = e?.message || "حصل خطأ";
+    err.value = e?.message || "فشل إرسال الكود";
   }finally{
     loading.value = false;
   }

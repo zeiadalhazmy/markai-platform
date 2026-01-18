@@ -1,67 +1,77 @@
 <template>
   <div class="section">
     <div class="container">
-      <div class="card" style="padding:22px; max-width:520px; margin: 0 auto;">
-        <h1 class="h1">تأكيد الكود</h1>
-        <div class="muted">أدخل كود OTP</div>
+      <div class="card" style="padding:22px; max-width:520px; margin:0 auto;">
+        <h1 class="h1">التحقق من الكود</h1>
+        <div class="muted">أدخل OTP ثم متابعة</div>
 
-        <div style="margin-top:14px;">
-          <input class="input" v-model="code" placeholder="مثال: 123456" />
+        <div class="muted" style="margin-top:10px;">
+          الإرسال إلى: <b>{{ target }}</b>
+        </div>
+
+        <div style="margin-top:12px;">
+          <div class="muted">الكود</div>
+          <input class="input" v-model="token" placeholder="123456" />
         </div>
 
         <div class="row" style="margin-top:12px;">
-          <button class="btn btn-primary" :disabled="loading || code.length < 4" @click="verify">
+          <button class="btn btn-primary" :disabled="loading" @click="verify">
             {{ loading ? "جاري التحقق..." : "تأكيد" }}
           </button>
-          <button class="btn" @click="back">رجوع</button>
-          <span class="muted" v-if="msg">{{ msg }}</span>
+          <router-link class="btn btn-ghost" to="/auth">رجوع</router-link>
         </div>
+
+        <div class="muted" v-if="err" style="margin-top:10px; color: var(--danger);">{{ err }}</div>
       </div>
     </div>
   </div>
 </template>
 
 <script setup>
-import { ref } from "vue";
+import { computed, ref } from "vue";
 import { useRouter } from "vue-router";
 import { supabase } from "../../lib/supabase";
-import { getUserRole, ensureProfileDefaultRole } from "../../lib/profile";
+import { ensureProfileDefaultRole } from "../../lib/profile";
 
 const router = useRouter();
-const code = ref("");
+const token = ref("");
 const loading = ref(false);
-const msg = ref("");
+const err = ref("");
 
-function isEmail(v){ return /\S+@\S+\.\S+/.test(v); }
+const mode = sessionStorage.getItem("otp_mode") || "phone";
+const value = sessionStorage.getItem("otp_value") || "";
+
+const target = computed(() => value || "—");
 
 async function verify(){
-  loading.value = true; msg.value = "";
+  loading.value = true;
+  err.value = "";
   try{
-    const identity = sessionStorage.getItem("otp_identity");
-    if (!identity) throw new Error("ارجع أرسل الكود من جديد");
+    const t = token.value.trim();
+    if (!t) throw new Error("أدخل الكود");
 
-    const payload = isEmail(identity)
-      ? { email: identity, token: code.value.trim(), type: "email" }
-      : { phone: identity, token: code.value.trim(), type: "sms" };
+    if (mode === "phone") {
+      const { error } = await supabase.auth.verifyOtp({
+        phone: value,
+        token: t,
+        type: "sms",
+      });
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.auth.verifyOtp({
+        email: value,
+        token: t,
+        type: "email",
+      });
+      if (error) throw error;
+    }
 
-    const { error } = await supabase.auth.verifyOtp(payload);
-    if (error) throw error;
-
-    await ensureProfileDefaultRole();
-    const role = await getUserRole();
-
-    // لو تبغاه يختار الدور أول مرة: ودّه لـ /auth/role
-    // حالياً: نوجّه مباشرة حسب الدور الموجود
-    if (role === "merchant") return router.replace("/merchant");
-    if (role === "courier") return router.replace("/courier");
-    if (role === "admin") return router.replace("/admin");
-    return router.replace("/client");
+    await ensureProfileDefaultRole(); // يضمن role=customer لأول مرة
+    router.replace("/auth/role");
   }catch(e){
-    msg.value = e?.message || "حصل خطأ";
+    err.value = e?.message || "فشل التحقق";
   }finally{
     loading.value = false;
   }
 }
-
-function back(){ router.push("/auth"); }
 </script>

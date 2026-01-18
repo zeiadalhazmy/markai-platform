@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 import { supabase } from "../lib/supabase";
 import { getUserRole, ensureProfileDefaultRole } from "../lib/profile";
+
 import AppShell from "../layouts/AppShell.vue";
 
 // Auth
@@ -28,12 +29,9 @@ import AdminHome from "../views/admin/HomeView.vue";
 const routes = [
   { path: "/", redirect: "/auth" },
 
-  // ✅ عشان ما تشوف القديم لما تفتح /login
-  { path: "/login", redirect: "/auth" },
-
   { path: "/auth", component: AuthView },
   { path: "/auth/verify", component: VerifyOtpView },
-  { path: "/auth/role", component: RolePickView, meta: { requiresAuth: true } },
+  { path: "/auth/role", component: RolePickView },
 
   {
     path: "/",
@@ -54,15 +52,19 @@ const routes = [
       { path: "admin", component: AdminHome, meta: { role: ["admin"] } },
     ],
   },
-
-  // fallback
-  { path: "/:pathMatch(.*)*", redirect: "/auth" },
 ];
 
 const router = createRouter({
   history: createWebHistory(),
   routes,
 });
+
+function roleHome(role){
+  if (role === "merchant") return "/merchant";
+  if (role === "courier") return "/courier";
+  if (role === "admin") return "/admin";
+  return "/client";
+}
 
 router.beforeEach(async (to) => {
   const requiresAuth = to.matched.some(r => r.meta?.requiresAuth);
@@ -71,18 +73,28 @@ router.beforeEach(async (to) => {
   const { data } = await supabase.auth.getSession();
   const session = data.session;
 
+  // لو صفحة محمية ومش مسجل
   if (requiresAuth && !session) return "/auth";
 
-  if (session) await ensureProfileDefaultRole();
+  // لو مسجل وواقف على auth، وده للهوم
+  if (session && to.path.startsWith("/auth")) {
+    try{
+      await ensureProfileDefaultRole();
+      const role = await getUserRole();
+      return role ? roleHome(role) : "/auth/role";
+    }catch{
+      return "/auth/role";
+    }
+  }
 
+  if (session) {
+    await ensureProfileDefaultRole();
+  }
+
+  // تحقق الصلاحية
   if (session && roleNeeded?.length) {
     const role = await getUserRole();
-    if (!roleNeeded.includes(role)) {
-      if (role === "merchant") return "/merchant";
-      if (role === "courier") return "/courier";
-      if (role === "admin") return "/admin";
-      return "/client";
-    }
+    if (!roleNeeded.includes(role)) return roleHome(role);
   }
 
   return true;

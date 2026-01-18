@@ -1,30 +1,43 @@
 <template>
-  <div class="shell">
-    <aside class="side card">
+  <div class="app">
+    <aside class="side">
       <div class="brand">
-        <div class="logo">ماركاي</div>
-        <div class="muted">{{ roleLabel }}</div>
+        <div class="logo"></div>
+        <div>
+          <div class="title">MarkAi</div>
+          <div class="muted" style="font-size:12px;">{{ roleLabel }}</div>
+        </div>
       </div>
 
       <nav class="nav">
-        <router-link v-for="i in items" :key="i.to" :to="i.to" class="navItem">
-          <span>{{ i.label }}</span>
+        <router-link v-for="it in menu" :key="it.to" class="navItem" :to="it.to">
+          {{ it.label }}
         </router-link>
       </nav>
 
-      <div class="footer">
+      <div class="sideFooter">
         <button class="btn btn-ghost" @click="logout">خروج</button>
       </div>
     </aside>
 
     <main class="main">
+      <header class="top">
+        <div>
+          <div style="font-weight:900;">لوحة التحكم</div>
+          <div class="muted" style="font-size:12px;">واجهة Responsive + Usability</div>
+        </div>
+        <div class="row">
+          <span class="badge">{{ roleLabel }}</span>
+        </div>
+      </header>
+
       <router-view />
     </main>
   </div>
 </template>
 
 <script setup>
-import { computed, ref, onMounted } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useRouter } from "vue-router";
 import { supabase } from "../lib/supabase";
 import { getUserRole } from "../lib/profile";
@@ -33,13 +46,9 @@ import { ROLE_LABEL } from "../lib/roles";
 const router = useRouter();
 const role = ref("customer");
 
-onMounted(async () => {
-  role.value = (await getUserRole()) || "customer";
-});
+const roleLabel = computed(() => ROLE_LABEL[role.value] || "—");
 
-const roleLabel = computed(() => ROLE_LABEL[role.value] || role.value);
-
-const items = computed(() => {
+const menu = computed(() => {
   if (role.value === "merchant") {
     return [
       { to: "/merchant", label: "الرئيسية" },
@@ -54,7 +63,9 @@ const items = computed(() => {
     ];
   }
   if (role.value === "admin") {
-    return [{ to: "/admin", label: "لوحة الإدارة" }];
+    return [
+      { to: "/admin", label: "الرئيسية" },
+    ];
   }
   return [
     { to: "/client", label: "الرئيسية" },
@@ -65,43 +76,66 @@ const items = computed(() => {
 
 async function logout() {
   await supabase.auth.signOut();
-  router.push("/auth");
+  router.replace("/auth");
 }
+
+onMounted(async () => {
+  try {
+    const r = await getUserRole();
+    if (r) role.value = r;
+  } catch {
+    // ignore
+  }
+});
 </script>
 
 <style scoped>
-.shell{
+.app{
   display:grid;
   grid-template-columns: 280px 1fr;
-  gap:14px;
-  padding: 14px;
+  min-height:100vh;
+}
+@media (max-width: 900px){
+  .app{ grid-template-columns: 1fr; }
+  .side{ position: sticky; top:0; z-index:10; }
 }
 .side{
-  padding: 14px;
-  height: calc(100vh - 28px);
-  position: sticky;
-  top: 14px;
-  display:flex;
-  flex-direction: column;
+  border-right:1px solid var(--border);
+  background: rgba(0,0,0,.18);
+  padding:14px;
 }
-.brand{ padding: 10px 10px 14px; border-bottom: 1px solid var(--border); }
-.logo{ font-weight: 900; font-size: 22px; letter-spacing: .5px; }
-.nav{ display:flex; flex-direction: column; gap: 8px; padding: 14px 6px; }
-.navItem{
-  padding: 10px 12px;
-  border-radius: 14px;
-  border: 1px solid transparent;
+.brand{
+  display:flex; gap:10px; align-items:center;
+  padding:12px;
+  border:1px solid var(--border);
+  border-radius: var(--radius);
   background: rgba(255,255,255,.04);
 }
-.navItem.router-link-active{
-  border-color: rgba(77,214,165,.45);
-  background: rgba(77,214,165,.12);
+.logo{
+  width:38px; height:38px; border-radius:12px;
+  background: linear-gradient(135deg, rgba(200,155,98,.95), rgba(138,90,43,.95));
 }
-.footer{ margin-top:auto; padding-top: 12px; border-top: 1px solid var(--border); }
-
-.main{ padding: 8px; }
-@media (max-width: 980px){
-  .shell{ grid-template-columns: 1fr; }
-  .side{ height:auto; position: relative; }
+.title{ font-weight:900; }
+.nav{ display:flex; flex-direction:column; gap:8px; margin-top:12px; }
+.navItem{
+  padding:10px 12px;
+  border-radius: 12px;
+  border:1px solid var(--border);
+  background: rgba(255,255,255,.04);
+  font-weight:800;
+}
+.navItem.router-link-active{
+  border-color: rgba(200,155,98,.55);
+  background: rgba(200,155,98,.10);
+}
+.sideFooter{ margin-top:12px; }
+.main{ padding:14px; }
+.top{
+  display:flex; justify-content:space-between; align-items:center; gap:12px;
+  padding:12px 14px;
+  border:1px solid var(--border);
+  border-radius: var(--radius);
+  background: rgba(255,255,255,.04);
+  margin-bottom:14px;
 }
 </style>
