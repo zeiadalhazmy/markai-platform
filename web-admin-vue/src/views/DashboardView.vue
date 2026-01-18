@@ -16,6 +16,11 @@
       <li><router-link to="/admin/orders">Admin Orders</router-link></li>
       <li><router-link to="/admin/vendors">Admin Vendors</router-link></li>
 <li><router-link to="/admin/branches">Admin Branches</router-link></li>
+<li><router-link to="/addresses">My Addresses (Auth)</router-link></li>
+<li><router-link to="/checkout">Checkout / Create Order (Auth)</router-link></li>
+<li><router-link to="/service-requests">Service Requests (Auth)</router-link></li>
+<li><router-link to="/courier">Courier Panel (Role)</router-link></li>
+
 
     </ul>
 

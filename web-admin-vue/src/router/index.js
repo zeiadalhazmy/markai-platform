@@ -50,6 +50,32 @@ const routes = [
   name: "admin-products",
   component: () => import("../views/AdminProductsView.vue"),
 },
+{
+  path: "/addresses",
+  name: "addresses",
+  component: () => import("../views/AddressesView.vue"),
+},
+{
+  path: "/checkout",
+  name: "checkout",
+  component: () => import("../views/CheckoutView.vue"),
+},
+{
+  path: "/service-requests",
+  name: "service-requests",
+  component: () => import("../views/ServiceRequestsView.vue"),
+},
+{
+  path: "/courier",
+  name: "courier",
+  component: () => import("../views/CourierView.vue"),
+},
+{
+  path: "/addresses",
+  name: "addresses",
+  component: () => import("../views/AddressesView.vue"),
+},
+
 
 
 
