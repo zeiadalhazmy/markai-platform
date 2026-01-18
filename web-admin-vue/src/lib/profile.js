@@ -1,47 +1,52 @@
 import { supabase } from "./supabase";
-import { ROLES } from "./roles";
 
-export async function getCurrentUser() {
-  const { data } = await supabase.auth.getUser();
-  return data?.user || null;
+export async function getUserRole() {
+  const { data: s } = await supabase.auth.getSession();
+  const userId = s.session?.user?.id;
+  if (!userId) return null;
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", userId)
+    .single();
+
+  if (error) return null;
+  return data?.role ?? null;
 }
 
 export async function ensureProfileDefaultRole() {
-  const user = await getCurrentUser();
-  if (!user) return null;
+  const { data: s } = await supabase.auth.getSession();
+  const userId = s.session?.user?.id;
+  if (!userId) return;
 
-  // 1) جرّب جدول profiles
-  const { data: prof, error } = await supabase
+  const { data } = await supabase
     .from("profiles")
     .select("id, role")
-    .eq("id", user.id)
-    .maybeSingle();
+    .eq("id", userId)
+    .single();
 
-  if (!error && prof) return prof;
+  // لو ما لقا سجل (لسبب ما) أنشئه
+  if (!data?.id) {
+    await supabase.from("profiles").insert({ id: userId, role: "customer" });
+    return;
+  }
 
-  // لو ما في سجل -> أنشئه كـ customer
-  await supabase.from("profiles").upsert({
-    id: user.id,
-    role: ROLES.CUSTOMER,
-  });
-
-  return { id: user.id, role: ROLES.CUSTOMER };
+  // لو role فاضي
+  if (!data.role) {
+    await supabase.from("profiles").update({ role: "customer" }).eq("id", userId);
+  }
 }
 
-export async function getUserRole() {
-  const user = await getCurrentUser();
-  if (!user) return null;
+export async function setMyRole(role) {
+  const { data: s } = await supabase.auth.getSession();
+  const userId = s.session?.user?.id;
+  if (!userId) throw new Error("No session");
 
-  // profiles أولاً
-  const { data: prof } = await supabase
+  const { error } = await supabase
     .from("profiles")
-    .select("role")
-    .eq("id", user.id)
-    .maybeSingle();
+    .update({ role })
+    .eq("id", userId);
 
-  if (prof?.role) return prof.role;
-
-  // fallback metadata
-  const metaRole = user?.user_metadata?.role || user?.app_metadata?.role;
-  return metaRole || ROLES.CUSTOMER;
+  if (error) throw error;
 }
