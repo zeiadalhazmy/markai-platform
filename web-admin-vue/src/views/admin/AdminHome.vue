@@ -33,4 +33,5 @@ async function logout(){
   await supabase.auth.signOut();
   router.push("/auth");
 }
+
 </script>
