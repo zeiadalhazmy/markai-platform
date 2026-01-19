@@ -1,0 +1,20 @@
+{
+    "common": {
+        "login": "Login",
+        "email": "Email Address",
+        "send_otp": "Send OTP",
+        "verify": "Verify",
+        "dashboard": "Dashboard",
+        "orders": "Orders",
+        "settings": "Settings",
+        "logout": "Logout",
+        "welcome": "Welcome",
+        "loading": "Loading..."
+    },
+    "auth": {
+        "enter_email": "Please enter your email",
+        "otp_sent": "OTP has been sent to your email",
+        "invalid_email": "Invalid email address",
+        "enter_otp": "Enter the 6-digit code"
+    }
+}

@@ -1,0 +1,9 @@
+{
+    "login": "Login",
+    "welcome": "Welcome",
+    "enter_email": "Enter Email Address",
+    "send_code": "Send Code",
+    "verify": "Verify",
+    "enter_otp": "Enter OTP",
+    "dashboard": "Dashboard"
+}

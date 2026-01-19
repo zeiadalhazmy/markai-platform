@@ -47,10 +47,36 @@ def health():
 def me(authorization: Optional[str] = Header(default=None)):
     user_id = get_user_id_from_auth(authorization)
     roles = sorted(list(get_user_roles(user_id)))
-    return {"user_id": user_id, "roles": roles}
 
+@app.post("/v1/roles")
+def assign_role(body: Dict[str, Any], authorization: Optional[str] = Header(default=None)):
+    user_id = get_user_id_from_auth(authorization)
+    role = body.get("role")
+    
+    allowed_roles = {"customer", "merchant", "courier"}  # 'admin' likely manual
+    if role not in allowed_roles:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Allowed: {allowed_roles}")
 
-def only_existing_cols(table: Table, data: Dict[str, Any]) -> Dict[str, Any]:
+    with engine.begin() as conn:
+        # Check if already has this role
+        existing = conn.execute(
+            select(user_roles)
+            .where(user_roles.c.user_id == user_id)
+            .where(user_roles.c.role == role)
+        ).first()
+        
+        if existing:
+            return {"ok": True, "message": "Role already assigned"}
+
+        # Insert
+        payload = {"user_id": user_id, "role": role}
+        if "created_at" in user_roles.c:
+            # let db handle or ignore
+            pass
+            
+        conn.execute(insert(user_roles).values(**payload))
+        return {"ok": True}
+
     cols = set(table.c.keys())
     return {k: v for k, v in data.items() if k in cols}
 

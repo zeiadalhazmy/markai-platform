@@ -5,9 +5,10 @@ import { getUserRole, ensureProfileDefaultRole } from "../lib/profile";
 import AppShell from "../layouts/AppShell.vue";
 
 // Auth
-import AuthView from "../views/auth/AuthView.vue";
-import VerifyOtpView from "../views/auth/VerifyOtpView.vue";
-import RolePickView from "../views/auth/RolePickView.vue";
+// Auth
+// import AuthView from "../views/auth/AuthView.vue"; // Replaced by Login.vue
+// import VerifyOtpView from "../views/auth/VerifyOtpView.vue";
+// import RolePickView from "../views/auth/RolePickView.vue";
 
 // Client
 import ClientHome from "../views/client/HomeView.vue";
@@ -29,9 +30,9 @@ import AdminHome from "../views/admin/HomeView.vue";
 const routes = [
   { path: "/", redirect: "/auth" },
 
-  { path: "/auth", component: AuthView },
-  { path: "/auth/verify", component: VerifyOtpView },
-  { path: "/auth/role", component: RolePickView },
+  { path: "/auth", component: () => import("../views/Login.vue") },
+  { path: "/auth/role", component: () => import("../views/auth/RolePickView.vue") },
+  { path: "/login", redirect: "/auth" },
 
   {
     path: "/",
@@ -59,7 +60,7 @@ const router = createRouter({
   routes,
 });
 
-function roleHome(role){
+function roleHome(role) {
   if (role === "merchant") return "/merchant";
   if (role === "courier") return "/courier";
   if (role === "admin") return "/admin";
@@ -78,11 +79,11 @@ router.beforeEach(async (to) => {
 
   // لو مسجل وواقف على auth، وده للهوم
   if (session && to.path.startsWith("/auth")) {
-    try{
+    try {
       await ensureProfileDefaultRole();
       const role = await getUserRole();
       return role ? roleHome(role) : "/auth/role";
-    }catch{
+    } catch {
       return "/auth/role";
     }
   }

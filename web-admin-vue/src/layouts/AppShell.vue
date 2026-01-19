@@ -1,141 +1,88 @@
 <template>
-  <div class="app">
-    <aside class="side">
-      <div class="brand">
-        <div class="logo"></div>
-        <div>
-          <div class="title">MarkAi</div>
-          <div class="muted" style="font-size:12px;">{{ roleLabel }}</div>
+  <div class="flex h-screen bg-gray-50 dark:bg-slate-950 overflow-hidden font-sans" :dir="$i18n.locale === 'ar' ? 'rtl' : 'ltr'">
+    
+    <Sidebar :role="currentRole" :menu="menuItems" @logout="handleLogout" />
+
+    <div class="flex-1 flex flex-col overflow-hidden relative">
+      <Navbar />
+
+      <main class="flex-1 overflow-x-hidden overflow-y-auto bg-gray-50 dark:bg-slate-950 p-6 scroll-smooth">
+        <div class="max-w-7xl mx-auto">
+             <router-view v-slot="{ Component }">
+                <transition 
+                    enter-active-class="transition ease-out duration-200" 
+                    enter-from-class="opacity-0 translate-y-2" 
+                    enter-to-class="opacity-100 translate-y-0" 
+                    leave-active-class="transition ease-in duration-150" 
+                    leave-from-class="opacity-100 translate-y-0" 
+                    leave-to-class="opacity-0 translate-y-2"
+                >
+                    <component :is="Component" />
+                </transition>
+            </router-view>
         </div>
-      </div>
-
-      <nav class="nav">
-        <router-link v-for="it in menu" :key="it.to" class="navItem" :to="it.to">
-          {{ it.label }}
-        </router-link>
-      </nav>
-
-      <div class="sideFooter">
-        <button class="btn btn-ghost" @click="logout">خروج</button>
-      </div>
-    </aside>
-
-    <main class="main">
-      <header class="top">
-        <div>
-          <div style="font-weight:900;">لوحة التحكم</div>
-          <div class="muted" style="font-size:12px;">واجهة Responsive + Usability</div>
-        </div>
-        <div class="row">
-          <span class="badge">{{ roleLabel }}</span>
-        </div>
-      </header>
-
-      <router-view />
-    </main>
+      </main>
+    </div>
   </div>
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
-import { supabase } from "../lib/supabase";
-import { getUserRole } from "../lib/profile";
-import { ROLE_LABEL } from "../lib/roles";
+import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
+import { useAuthStore } from '../stores/auth'
+import Sidebar from '../components/layout/Sidebar.vue'
+import Navbar from '../components/layout/Navbar.vue'
 
-const router = useRouter();
-const role = ref("customer");
+// Basic Role Logic (Ideally should be in a stricter Store or Composable)
+// Re-using logic from original file but making it reactive via pinia if possible
+// For now, we fetch manually to respect existing structure, but wrapped in clean code.
+import { getUserRole } from "../lib/profile"
 
-const roleLabel = computed(() => ROLE_LABEL[role.value] || "—");
+const router = useRouter()
+const authStore = useAuthStore()
+const currentRole = ref("customer")
 
-const menu = computed(() => {
-  if (role.value === "merchant") {
-    return [
+const menu = {
+  merchant: [
       { to: "/merchant", label: "الرئيسية" },
       { to: "/merchant/products", label: "المنتجات" },
       { to: "/merchant/orders", label: "الطلبات" },
-    ];
-  }
-  if (role.value === "courier") {
-    return [
+  ],
+  courier: [
       { to: "/courier", label: "الرئيسية" },
       { to: "/courier/tasks", label: "المهام" },
-    ];
-  }
-  if (role.value === "admin") {
-    return [
+  ],
+  admin: [
       { to: "/admin", label: "الرئيسية" },
-    ];
-  }
-  return [
+  ],
+  customer: [
     { to: "/client", label: "الرئيسية" },
     { to: "/client/products", label: "المنتجات" },
     { to: "/client/orders", label: "طلباتي" },
-  ];
-});
+  ]
+}
 
-async function logout() {
-  await supabase.auth.signOut();
-  router.replace("/auth");
+const menuItems = computed(() => {
+    return menu[currentRole.value] || menu.customer
+})
+
+async function handleLogout() {
+    await authStore.signOut()
+    router.replace('/auth')
 }
 
 onMounted(async () => {
-  try {
-    const r = await getUserRole();
-    if (r) role.value = r;
-  } catch {
-    // ignore
-  }
-});
+    // Sync Pinia
+    if (!authStore.session) {
+        await authStore.init()
+    }
+    
+    // Fetch Role
+    try {
+        const r = await getUserRole()
+        if (r) currentRole.value = r
+    } catch (e) {
+        console.error("Failed to fetch role", e)
+    }
+})
 </script>
-
-<style scoped>
-.app{
-  display:grid;
-  grid-template-columns: 280px 1fr;
-  min-height:100vh;
-}
-@media (max-width: 900px){
-  .app{ grid-template-columns: 1fr; }
-  .side{ position: sticky; top:0; z-index:10; }
-}
-.side{
-  border-right:1px solid var(--border);
-  background: rgba(0,0,0,.18);
-  padding:14px;
-}
-.brand{
-  display:flex; gap:10px; align-items:center;
-  padding:12px;
-  border:1px solid var(--border);
-  border-radius: var(--radius);
-  background: rgba(255,255,255,.04);
-}
-.logo{
-  width:38px; height:38px; border-radius:12px;
-  background: linear-gradient(135deg, rgba(200,155,98,.95), rgba(138,90,43,.95));
-}
-.title{ font-weight:900; }
-.nav{ display:flex; flex-direction:column; gap:8px; margin-top:12px; }
-.navItem{
-  padding:10px 12px;
-  border-radius: 12px;
-  border:1px solid var(--border);
-  background: rgba(255,255,255,.04);
-  font-weight:800;
-}
-.navItem.router-link-active{
-  border-color: rgba(200,155,98,.55);
-  background: rgba(200,155,98,.10);
-}
-.sideFooter{ margin-top:12px; }
-.main{ padding:14px; }
-.top{
-  display:flex; justify-content:space-between; align-items:center; gap:12px;
-  padding:12px 14px;
-  border:1px solid var(--border);
-  border-radius: var(--radius);
-  background: rgba(255,255,255,.04);
-  margin-bottom:14px;
-}
-</style>
