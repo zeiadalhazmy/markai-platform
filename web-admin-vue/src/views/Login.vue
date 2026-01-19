@@ -110,7 +110,7 @@ import { useI18n } from 'vue-i18n'
 
 const authStore = useAuthStore()
 const router = useRouter()
-const { locale } = useI18n()
+const { locale, t } = useI18n()
 
 const step = ref(1)
 const email = ref('')
@@ -120,8 +120,6 @@ const canResend = ref(false)
 let timerInterval = null
 
 const resendButtonText = computed(() => {
-    // Note: accessing $t inside script setup requires useI18n composer
-    const { t } = useI18n() 
     return canResend.value 
         ? t('auth.resend_code') 
         : `${t('auth.resend_in')} ${resendTimer.value}s`

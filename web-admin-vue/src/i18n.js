@@ -4,6 +4,7 @@ import en from './locales/en.json'
 
 const i18n = createI18n({
     legacy: false, // Use Composition API
+    globalInjection: true, // Allow usage of $t in templates
     locale: 'ar', // Default to Arabic
     fallbackLocale: 'en',
     messages: {
