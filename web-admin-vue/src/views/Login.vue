@@ -8,16 +8,16 @@
           {{ $t('common.welcome') }}
         </h2>
         <p class="mt-2 text-sm text-gray-600 dark:text-gray-400">
-          {{ step === 1 ? $t('auth.enter_email') : $t('auth.enter_otp') }}
+          {{ $t('common.login') }}
         </p>
       </div>
 
       <!-- Form -->
       <form class="mt-8 space-y-6" @submit.prevent="handleSubmit">
-        <div class="rounded-md shadow-sm -space-y-px">
+        <div class="rounded-md shadow-sm space-y-4">
           
           <!-- Email Input -->
-          <div v-if="step === 1">
+          <div>
             <label for="email-address" class="sr-only">{{ $t('common.email') }}</label>
             <input 
               id="email-address" 
@@ -26,24 +26,22 @@
               autocomplete="email" 
               required 
               v-model="email"
-              :class="{'text-right': $i18n.locale === 'ar', 'text-left': $i18n.locale === 'en'}"
               class="appearance-none relative block w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 focus:z-10 sm:text-sm bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-white transition-colors"
               :placeholder="$t('common.email')"
             />
           </div>
 
-          <!-- OTP Input -->
-          <div v-else>
-            <label for="otp" class="sr-only">OTP</label>
+          <!-- Password Input -->
+          <div>
+            <label for="password" class="sr-only">Password</label>
              <input 
-              id="otp" 
-              name="otp" 
-              type="text" 
+              id="password" 
+              name="password" 
+              type="password" 
               required 
-              v-model="otp"
-              class="appearance-none relative block w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 focus:z-10 sm:text-sm bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-white tracking-widest text-center text-lg font-mono"
-              placeholder="123456"
-              maxlength="6"
+              v-model="password"
+              class="appearance-none relative block w-full px-3 py-3 border border-gray-300 placeholder-gray-500 text-gray-900 rounded-lg focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-primary-500 focus:z-10 sm:text-sm bg-gray-50 dark:bg-gray-700 dark:border-gray-600 dark:text-white transition-colors"
+              placeholder="************"
             />
           </div>
         </div>
@@ -68,26 +66,9 @@
               {{ $t('common.loading') }}
            </span>
             <span v-else>
-               {{ step === 1 ? $t('common.send_otp') : $t('common.verify') }}
+               {{ $t('common.login') }}
             </span>
           </button>
-        </div>
-        
-        <div v-if="step === 2" class="text-center mt-4 space-y-2">
-             <button 
-                type="button" 
-                @click="resendOtp" 
-                :disabled="!canResend || authStore.loading"
-                class="text-sm font-medium transition-colors"
-                :class="canResend ? 'text-primary-600 hover:text-primary-500 cursor-pointer' : 'text-gray-400 cursor-not-allowed'"
-             >
-                {{ resendButtonText }}
-             </button>
-             <div>
-               <button type="button" @click="step = 1" class="text-xs text-gray-500 hover:text-gray-700">
-                  {{ $t('auth.change_email') }}
-               </button>
-             </div>
         </div>
       </form>
 
@@ -103,66 +84,24 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
 const authStore = useAuthStore()
 const router = useRouter()
-const { locale, t } = useI18n()
+const { locale } = useI18n()
 
-const step = ref(1)
 const email = ref('')
-const otp = ref('')
-const resendTimer = ref(30)
-const canResend = ref(false)
-let timerInterval = null
-
-const resendButtonText = computed(() => {
-    return canResend.value 
-        ? t('auth.resend_code') 
-        : `${t('auth.resend_in')} ${resendTimer.value}s`
-})
-
-
-function startTimer() {
-    resendTimer.value = 30
-    canResend.value = false
-    if (timerInterval) clearInterval(timerInterval)
-    
-    timerInterval = setInterval(() => {
-        if (resendTimer.value > 0) {
-            resendTimer.value--
-        } else {
-            canResend.value = true
-            clearInterval(timerInterval)
-        }
-    }, 1000)
-}
-
-async function resendOtp() {
-    if (!canResend.value) return
-    await authStore.signInWithOtp(email.value)
-    if (!authStore.error) {
-        startTimer()
-    }
-}
+const password = ref('')
 
 async function handleSubmit() {
-    if (step.value === 1) {
-        if (!email.value) return
-        await authStore.signInWithOtp(email.value)
-        if (!authStore.error) {
-            step.value = 2
-            startTimer()
-        }
-    } else {
-        if (!otp.value) return
-        const success = await authStore.verifyOtp(email.value, otp.value)
-        if (success) {
-            router.push('/')
-        }
+    if (!email.value || !password.value) return
+    
+    const success = await authStore.signInWithPassword(email.value, password.value)
+    if (success) {
+        router.push('/')
     }
 }
 
@@ -171,5 +110,4 @@ function switchLang(lang) {
     document.documentElement.setAttribute('dir', lang === 'ar' ? 'rtl' : 'ltr')
     document.documentElement.setAttribute('lang', lang)
 }
-// End of script
 </script>

@@ -8,19 +8,21 @@ export const useAuthStore = defineStore('auth', () => {
     const loading = ref(false)
     const error = ref(null)
 
-    async function signInWithOtp(email) {
+    async function signInWithPassword(email, password) {
         loading.value = true
         error.value = null
         try {
-            const { error: err } = await supabase.auth.signInWithOtp({
+            const { data, error: err } = await supabase.auth.signInWithPassword({
                 email,
-                options: {
-                    shouldCreateUser: false, // Only allow existing users? Modify based on logic
-                }
+                password
             })
             if (err) throw err
+            user.value = data.user
+            session.value = data.session
+            return true
         } catch (e) {
             error.value = e.message
+            return false
         } finally {
             loading.value = false
         }
@@ -65,5 +67,5 @@ export const useAuthStore = defineStore('auth', () => {
         })
     }
 
-    return { user, session, loading, error, signInWithOtp, verifyOtp, signOut, init }
+    return { user, session, loading, error, signInWithPassword, signOut, init }
 })
