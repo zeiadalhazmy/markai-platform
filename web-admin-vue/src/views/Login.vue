@@ -171,4 +171,5 @@ function switchLang(lang) {
     document.documentElement.setAttribute('dir', lang === 'ar' ? 'rtl' : 'ltr')
     document.documentElement.setAttribute('lang', lang)
 }
+// End of script
 </script>

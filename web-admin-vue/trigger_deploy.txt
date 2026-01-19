@@ -1,0 +1,2 @@
+This file exists solely to trigger a new deployment on Vercel.
+Timestamp: 2026-01-19T10:13:00+03:00
