@@ -81,7 +81,7 @@
                 class="text-sm font-medium transition-colors"
                 :class="canResend ? 'text-primary-600 hover:text-primary-500 cursor-pointer' : 'text-gray-400 cursor-not-allowed'"
              >
-                {{ canResend ? $t('auth.resend_code') : `${$t('auth.resend_in')} ${resendTimer}s` }}
+                {{ resendButtonText }}
              </button>
              <div>
                <button type="button" @click="step = 1" class="text-xs text-gray-500 hover:text-gray-700">
@@ -103,7 +103,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { useAuthStore } from '../stores/auth'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
@@ -118,6 +118,15 @@ const otp = ref('')
 const resendTimer = ref(30)
 const canResend = ref(false)
 let timerInterval = null
+
+const resendButtonText = computed(() => {
+    // Note: accessing $t inside script setup requires useI18n composer
+    const { t } = useI18n() 
+    return canResend.value 
+        ? t('auth.resend_code') 
+        : `${t('auth.resend_in')} ${resendTimer.value}s`
+})
+
 
 function startTimer() {
     resendTimer.value = 30
