@@ -73,10 +73,21 @@
           </button>
         </div>
         
-        <div v-if="step === 2" class="text-center mt-4">
-             <button type="button" @click="step = 1" class="text-sm text-primary-600 hover:text-primary-500 font-medium">
-                Resend / Change Email
+        <div v-if="step === 2" class="text-center mt-4 space-y-2">
+             <button 
+                type="button" 
+                @click="resendOtp" 
+                :disabled="!canResend || authStore.loading"
+                class="text-sm font-medium transition-colors"
+                :class="canResend ? 'text-primary-600 hover:text-primary-500 cursor-pointer' : 'text-gray-400 cursor-not-allowed'"
+             >
+                {{ canResend ? $t('auth.resend_code') : `${$t('auth.resend_in')} ${resendTimer}s` }}
              </button>
+             <div>
+               <button type="button" @click="step = 1" class="text-xs text-gray-500 hover:text-gray-700">
+                  {{ $t('auth.change_email') }}
+               </button>
+             </div>
         </div>
       </form>
 
@@ -104,6 +115,32 @@ const { locale } = useI18n()
 const step = ref(1)
 const email = ref('')
 const otp = ref('')
+const resendTimer = ref(30)
+const canResend = ref(false)
+let timerInterval = null
+
+function startTimer() {
+    resendTimer.value = 30
+    canResend.value = false
+    if (timerInterval) clearInterval(timerInterval)
+    
+    timerInterval = setInterval(() => {
+        if (resendTimer.value > 0) {
+            resendTimer.value--
+        } else {
+            canResend.value = true
+            clearInterval(timerInterval)
+        }
+    }, 1000)
+}
+
+async function resendOtp() {
+    if (!canResend.value) return
+    await authStore.signInWithOtp(email.value)
+    if (!authStore.error) {
+        startTimer()
+    }
+}
 
 async function handleSubmit() {
     if (step.value === 1) {
@@ -111,6 +148,7 @@ async function handleSubmit() {
         await authStore.signInWithOtp(email.value)
         if (!authStore.error) {
             step.value = 2
+            startTimer()
         }
     } else {
         if (!otp.value) return

@@ -15,26 +15,62 @@ class _LoginPageState extends State<LoginPage> {
   final _otpController = TextEditingController();
   bool _isLoading = false;
   int _step = 1; // 1: Email, 2: OTP
+  int _resendTimer = 30;
+  bool _canResend = false;
+
+  @override
+  void dispose() {
+    _emailController.dispose();
+    _otpController.dispose();
+    super.dispose();
+  }
+
+  void _startTimer() {
+    setState(() {
+      _resendTimer = 30;
+      _canResend = false;
+    });
+    Future.doWhile(() async {
+      await Future.delayed(const Duration(seconds: 1));
+      if (!mounted) return false;
+      setState(() {
+        if (_resendTimer > 0) {
+          _resendTimer--;
+        } else {
+          _canResend = true;
+        }
+      });
+      return _resendTimer > 0;
+    });
+  }
 
   Future<void> _sendOtp() async {
-    if (_emailController.text.isEmpty) return;
+    if (_emailController.text.isEmpty) {
+      _showError('please_enter_email'.tr());
+      return;
+    }
     setState(() => _isLoading = true);
     try {
       await Supabase.instance.client.auth.signInWithOtp(
         email: _emailController.text.trim(),
-        shouldCreateUser: false,
+        shouldCreateUser: true, // Allow new users
       );
-      setState(() => _step = 2);
+      setState(() {
+        _step = 2;
+        _isLoading = false;
+      });
+      _startTimer();
     } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Error: $e')));
-    } finally {
+      _showError(e.toString());
       setState(() => _isLoading = false);
     }
   }
 
   Future<void> _verifyOtp() async {
-    if (_otpController.text.isEmpty) return;
+    if (_otpController.text.isEmpty) {
+      _showError('please_enter_code'.tr());
+      return;
+    }
     setState(() => _isLoading = true);
     try {
       final response = await Supabase.instance.client.auth.verifyOTP(
@@ -42,15 +78,32 @@ class _LoginPageState extends State<LoginPage> {
         token: _otpController.text.trim(),
         type: OtpType.email,
       );
-      // Navigate to Dashboard on success (mocking navigation here)
-      ScaffoldMessenger.of(context)
-          .showSnackBar(const SnackBar(content: Text('Login Success!')));
+
+      if (response.session != null) {
+        if (mounted) {
+          // Navigate to Home - Replacing with a simple distinct placeholder for now
+          Navigator.of(context).pushReplacement(MaterialPageRoute(
+              builder: (_) => const Scaffold(
+                  body: Center(child: Text("Home Page Placeholder")))));
+        }
+      } else {
+        throw Exception('Login failed');
+      }
     } catch (e) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('Error: $e')));
+      _showError(e.toString());
     } finally {
-      setState(() => _isLoading = false);
+      if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _showError(String message) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: Colors.red,
+        behavior: SnackBarBehavior.floating,
+      ),
+    );
   }
 
   @override
@@ -131,6 +184,21 @@ class _LoginPageState extends State<LoginPage> {
                             strokeWidth: 2, color: Colors.white))
                     : Text(_step == 1 ? 'send_code'.tr() : 'verify'.tr()),
               ),
+
+              if (_step == 2) ...[
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: _canResend ? _sendOtp : null,
+                  child: Text(
+                    _canResend
+                        ? 'resend_code'.tr()
+                        : '${'resend_in'.tr()} ${_resendTimer}s',
+                    style: TextStyle(
+                      color: _canResend ? AppColors.primary : Colors.grey,
+                    ),
+                  ),
+                ),
+              ],
 
               const SizedBox(height: 24),
               // Language Switch
